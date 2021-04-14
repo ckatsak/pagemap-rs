@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use bitflags::bitflags;
@@ -46,7 +46,7 @@ impl MemoryRegion {
 
 impl std::convert::From<(u64, u64)> for MemoryRegion {
     fn from(r: (u64, u64)) -> Self {
-        assert!(r.0 < r.1); // TODO: TryFrom
+        debug_assert!(r.0 < r.1); // TODO: TryFrom
         MemoryRegion {
             start: r.0,
             end: r.1,
@@ -63,6 +63,18 @@ impl std::str::FromStr for MemoryRegion {
             .map(|addr| u64::from_str_radix(addr, 16))
             .collect::<Result<_, _>>()?;
         Ok((r[0], r[1]).into())
+    }
+}
+
+impl fmt::Display for MemoryRegion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "0x{:016x}-0x{:016x} ({:5}K)",
+            self.start,
+            self.end,
+            self.size() / 1024,
+        )
     }
 }
 
@@ -86,7 +98,7 @@ bitflags! {
 
 impl fmt::Display for PagePermissions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = "----".to_owned();
+        let mut ret = "---p".to_owned();
         if *self != Self::EMPTY {
             if *self & Self::READ == Self::READ {
                 ret.replace_range(0..1, "r");
@@ -126,6 +138,9 @@ impl std::str::FromStr for PagePermissions {
                 _ => panic!("invalid page permissions"),
             }
         }
+        if ret == Self::EMPTY {
+            panic!("invalid page permissions: '----'")
+        }
         Ok(ret)
     }
 }
@@ -156,8 +171,8 @@ impl DeviceNumbers {
 
 impl std::convert::From<(u32, u32)> for DeviceNumbers {
     fn from(p: (u32, u32)) -> Self {
-        assert!(p.0 < 1 << 12); // TODO: TryFrom
-        assert!(p.1 < 1 << 20); // TODO: TryFrom
+        debug_assert!(p.0 < 1 << 12); // TODO: TryFrom
+        debug_assert!(p.1 < 1 << 20); // TODO: TryFrom
         DeviceNumbers {
             major: p.0 as u16,
             minor: p.1,
@@ -191,9 +206,9 @@ impl fmt::Display for DeviceNumbers {
 
 #[derive(Debug, Default)]
 struct MapsEntry {
-    region: (u64, u64),
+    region: MemoryRegion,
     perms: PagePermissions,
-    offset: usize, // FIXME?
+    offset: u64, // FIXME?
     dev: DeviceNumbers,
     inode: u64,
     pathname: Option<String>,
@@ -204,15 +219,10 @@ impl std::str::FromStr for MapsEntry {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s: Vec<_> = s.split_ascii_whitespace().collect();
-        let region: Vec<_> = s[0]
-            .splitn(2, '-')
-            .map(|addr| u64::from_str_radix(addr, 16))
-            .collect::<Result<_, _>>()?;
-
         Ok(MapsEntry {
-            region: (region[0], region[1]),
+            region: s[0].parse()?,
             perms: s[1].parse()?,
-            offset: usize::from_str_radix(s[2], 16)?,
+            offset: u64::from_str_radix(s[2], 16)?,
             dev: s[3].parse()?,
             inode: s[4].parse()?,
             pathname: s.get(5).map(|&p| p.to_owned()),
@@ -225,9 +235,61 @@ impl fmt::Display for MapsEntry {
         // TODO
         write!(
             f,
-            "{:?} {} {} {} {} {:?}",
+            "{} {} {:20} {} {} {:?}",
             self.region, self.perms, self.offset, self.dev, self.inode, self.pathname
         )
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Page
+//
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub type Page = u64;
+//pub enum Page {
+//    Present {},
+//    Swapped {},
+//}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// PageMap
+//
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+pub struct PageMap {
+    f: BufReader<File>,
+    #[allow(dead_code)]
+    pid: u64,
+    page_size: u64,
+}
+
+impl PageMap {
+    // FIXME: define custom error type to return
+    pub fn new(pid: u64) -> anyhow::Result<Self> {
+        let path = PathBuf::from(format!("/proc/{}/pagemap", pid));
+        let f = BufReader::new(File::open(&path)?);
+        let page_size = page_size();
+        Ok(PageMap { f, pid, page_size })
+    }
+
+    // FIXME: define custom error type to return
+    pub fn pagemap(&mut self, region: &MemoryRegion) -> anyhow::Result<Vec<Page>> {
+        let mut buf = [0; 8];
+        (region.start..region.end)
+            .step_by(self.page_size as usize)
+            .map(|addr: u64| -> Result<_, _> {
+                let vpn = addr / self.page_size;
+                self.f
+                    .seek(SeekFrom::Start(vpn * std::mem::size_of::<u64>() as u64))?;
+                self.f.read_exact(&mut buf)?;
+                let ret = u64::from_ne_bytes(buf);
+                eprintln!("addr: {:016x}; pn: {}, v: {:016x}", addr, vpn, ret);
+                Ok(ret)
+            })
+            .collect::<Result<_, _>>()
     }
 }
 
@@ -237,17 +299,17 @@ impl fmt::Display for MapsEntry {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+pub fn page_size() -> u64 {
+    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 } // FIXME: error handling
+}
+
 fn parse_args() -> u64 {
     std::env::args().nth(1).unwrap().parse().unwrap() // FIXME
 }
 
-fn page_size() -> usize {
-    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize } // FIXME: error handling
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// core logic
+// binary
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -261,13 +323,33 @@ fn main() -> anyhow::Result<()> {
     let maps = BufReader::new(File::open(&maps_path)?);
     let pagemap = BufReader::new(File::open(&pagemap_path)?);
 
-    let entries: Vec<MapsEntry> = maps
+    //let maps_entries: Vec<MapsEntry> = maps
+    //    .lines()
+    //    .map(|line| line.unwrap().parse())
+    //    .collect::<Result<_, _>>()?;
+    //for (i, entry) in maps_entries.iter().enumerate() {
+    //    eprintln!("{:4}: {}", i, entry);
+    //}
+
+    let mut pm = PageMap::new(pid)?;
+    //let e1 = maps_entries
+    //    .get(0)
+    //    .ok_or_else(|| anyhow::anyhow!("maps_entries empty!"))?;
+    ////let r1 = &e1.region;
+    //let p = pm.pagemap(&e1.region)?;
+    //eprintln!("p = {:x?}", p);
+
+    let pages = maps
         .lines()
-        .map(|line| line.unwrap().parse())
-        .collect::<Result<_, _>>()?;
-    for (i, entry) in entries.iter().enumerate() {
-        eprintln!("{:4}: {}", i, entry);
-    }
+        //.flat_map(|line| pm.pagemap(line.unwrap().parse::<MapsEntry>()?.region))
+        .flat_map(|line| -> Result<_, anyhow::Error> {
+            let entry = line.unwrap().parse::<MapsEntry>()?;
+            let pgs = pm.pagemap(&entry.region)?;
+            //eprintln!("pgs = {:x?}", pgs);
+            Ok(pgs)
+        })
+        .collect::<Vec<_>>();
+    //eprintln!("pages = {:#016x?}", pages);
 
     Ok(())
 }
@@ -283,16 +365,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_perms() {
+    fn test_valid_perms() {
         let perms = vec![
-            "----", "---s", "---p", "r--s", "r--p", "-w--", "-w-s", "-w-p", "--x-", "--xs", "--xp",
-            "rw-p", "r-xp",
+            "---s", "---p", "r--s", "r--p", "rw-s", "-w-s", "-w-p", "--xs", "--xp", "rw-p", "r-xp",
         ];
         for p in perms {
             let pp = p.parse::<PagePermissions>().unwrap();
             eprintln!("pp = {:?}", pp);
             assert_eq!(format!("{}", pp), p);
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_perms() {
+        assert!("----".parse::<PagePermissions>().is_err());
     }
 
     #[test]
