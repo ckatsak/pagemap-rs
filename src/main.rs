@@ -1,9 +1,9 @@
-#![allow(unused_variables)] // FIXME
+//#![allow(unused_variables)] // FIXME
 
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::PathBuf;
+////use std::path::PathBuf;
 
 use bitflags::bitflags;
 
@@ -13,7 +13,7 @@ use bitflags::bitflags;
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct MemoryRegion {
     start: u64,
     end: u64,
@@ -151,7 +151,7 @@ impl std::str::FromStr for PagePermissions {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct DeviceNumbers {
     major: u16, // major: u12
     minor: u32, // minor: u20
@@ -204,8 +204,8 @@ impl fmt::Display for DeviceNumbers {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-#[derive(Debug, Default)]
-struct MapsEntry {
+#[derive(Debug, Default, Clone)]
+pub struct MapsEntry {
     region: MemoryRegion,
     perms: PagePermissions,
     offset: u64, // FIXME?
@@ -388,45 +388,79 @@ impl fmt::Display for PageMapData {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#[derive(Debug)]
 pub struct PageMap {
-    f: BufReader<File>,
-    #[allow(dead_code)]
     pid: u64,
+    mf: BufReader<File>,
+    pmf: BufReader<File>,
     page_size: u64,
 }
 
 impl PageMap {
     // FIXME: define custom error type to return
     pub fn new(pid: u64) -> anyhow::Result<Self> {
-        let path = PathBuf::from(format!("/proc/{}/pagemap", pid));
-        let f = BufReader::new(File::open(&path)?);
-        let page_size = page_size();
-        Ok(PageMap { f, pid, page_size })
+        Ok(PageMap {
+            pid,
+            mf: BufReader::new(File::open(format!("/proc/{}/maps", pid))?),
+            pmf: BufReader::new(File::open(format!("/proc/{}/pagemap", pid))?),
+            page_size: page_size(),
+        })
+    }
+
+    pub fn pid(&self) -> u64 {
+        self.pid
+    }
+
+    // FIXME?: define custom error type to return?
+    pub fn maps(&mut self) -> Result<Vec<MapsEntry>, std::num::ParseIntError> {
+        self.mf
+            .by_ref()
+            .lines()
+            .map(|line| line.unwrap().parse::<MapsEntry>())
+            .collect()
     }
 
     // FIXME: define custom error type to return
-    pub fn pagemap(&mut self, region: &MemoryRegion) -> anyhow::Result<Vec<PageMapData>> {
+    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> anyhow::Result<Vec<PageMapData>> {
+        //eprintln!(
+        //    "region = {}; count = {}",
+        //    region,
+        //    (region.start..region.end)
+        //        .step_by(self.page_size as usize)
+        //        .count()
+        //);
         let mut buf = [0; 8];
-        eprintln!(
-            "region = {}; count = {}",
-            region,
-            (region.start..region.end)
-                .step_by(self.page_size as usize)
-                .count()
-        );
         (region.start..region.end)
             .step_by(self.page_size as usize)
             .map(|addr: u64| -> Result<_, _> {
                 let vpn = addr / self.page_size;
-                self.f.seek(SeekFrom::Start(vpn * 8))?;
-                self.f.read_exact(&mut buf)?;
-                let ret = u64::from_ne_bytes(buf);
-                eprintln!("addr: {:016x}; pn: {}, v: {:016x}", addr, vpn, ret);
-                let ret = ret.into();
-                eprintln!("page = {}\n", ret);
-                Ok(ret)
+                self.pmf.seek(SeekFrom::Start(vpn * 8))?;
+                self.pmf.read_exact(&mut buf)?;
+                Ok(u64::from_ne_bytes(buf).into())
+                //let ret = u64::from_ne_bytes(buf);
+                //eprintln!("addr: {:016x}; vpn: {}, v: {:016x}", addr, vpn, ret);
+                //let ret = ret.into();
+                //eprintln!("page = {}\n", ret);
+                //Ok(ret)
             })
             .collect::<Result<_, _>>()
+    }
+
+    // FIXME: define custom error type to return
+    pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapData>)>, anyhow::Error> {
+        self.maps()?
+            .iter()
+            .map(|map_entry| Ok((map_entry.clone(), self.pagemap_region(&map_entry.region)?)))
+            .collect()
+        //
+        //self.maps()?
+        //    .iter()
+        //    .map(
+        //        |map_entry| -> Result<(MapsEntry, Vec<PageMapData>), anyhow::Error> {
+        //            Ok((map_entry.clone(), self.pagemap_region(&map_entry.region)?))
+        //        },
+        //    )
+        //    .collect()
     }
 }
 
@@ -452,60 +486,64 @@ fn parse_args() -> u64 {
 
 fn main() -> anyhow::Result<()> {
     let pid = parse_args();
-    let page_size = page_size();
+    //// let page_size = page_size();
 
-    let maps_path = PathBuf::from(format!("/proc/{}/maps", pid));
-    let pagemap_path = PathBuf::from(format!("/proc/{}/pagemap", pid));
+    //// let maps_path = PathBuf::from(format!("/proc/{}/maps", pid));
+    //// let pagemap_path = PathBuf::from(format!("/proc/{}/pagemap", pid));
 
-    let maps = BufReader::new(File::open(&maps_path)?);
-    let pagemap = BufReader::new(File::open(&pagemap_path)?);
+    //// let maps = BufReader::new(File::open(&maps_path)?);
+    //// let pagemap = BufReader::new(File::open(&pagemap_path)?);
 
-    //let maps_entries: Vec<MapsEntry> = maps
-    //    .lines()
-    //    .map(|line| line.unwrap().parse())
-    //    .collect::<Result<_, _>>()?;
-    //for (i, entry) in maps_entries.iter().enumerate() {
-    //    eprintln!("{:4}: {}", i, entry);
-    //}
+    //// //let maps_entries: Vec<MapsEntry> = maps
+    //// //    .lines()
+    //// //    .map(|line| line.unwrap().parse())
+    //// //    .collect::<Result<_, _>>()?;
+    //// //for (i, entry) in maps_entries.iter().enumerate() {
+    //// //    eprintln!("{:4}: {}", i, entry);
+    //// //}
+
+    //// let mut pm = PageMap::new(pid)?;
+    //// //let e1 = maps_entries
+    //// //    .get(0)
+    //// //    .ok_or_else(|| anyhow::anyhow!("maps_entries empty!"))?;
+    //// ////let r1 = &e1.region;
+    //// //let p = pm.pagemap(&e1.region)?;
+    //// //eprintln!("p = {:x?}", p);
+
+    //// let entries = maps
+    ////     .lines()
+    ////     //.flat_map(|line| pm.pagemap(line.unwrap().parse::<MapsEntry>()?.region))
+    ////     .flat_map(|line| -> Result<_, anyhow::Error> {
+    ////         let entry = line.unwrap().parse::<MapsEntry>()?;
+    ////         let pgs = pm.pagemap_region(&entry.region)?;
+    ////         //eprintln!("pgs = {:x?}", pgs);
+    ////         Ok((entry, pgs))
+    ////     })
+    ////     //.flatten()
+    ////     .collect::<Vec<(MapsEntry, Vec<PageMapData>)>>();
+    //// //eprintln!("entries = {:#016x?}", entries);
+    //// eprintln!("count = {}", entries.len());
+
+    //// eprintln!(
+    ////     "# present = {}",
+    ////     //entries.iter().filter(|&p| p.present()).count()
+    ////     entries
+    ////         .iter()
+    ////         .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.present()).count())
+    ////         .sum::<usize>()
+    //// );
+    //// eprintln!(
+    ////     "# swapped = {}",
+    ////     //entries.iter().filter(|&p| p.swapped()).count()
+    ////     entries
+    ////         .iter()
+    ////         .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.swapped()).count())
+    ////         .sum::<usize>()
+    //// );
 
     let mut pm = PageMap::new(pid)?;
-    //let e1 = maps_entries
-    //    .get(0)
-    //    .ok_or_else(|| anyhow::anyhow!("maps_entries empty!"))?;
-    ////let r1 = &e1.region;
-    //let p = pm.pagemap(&e1.region)?;
-    //eprintln!("p = {:x?}", p);
-
-    let entries = maps
-        .lines()
-        //.flat_map(|line| pm.pagemap(line.unwrap().parse::<MapsEntry>()?.region))
-        .flat_map(|line| -> Result<_, anyhow::Error> {
-            let entry = line.unwrap().parse::<MapsEntry>()?;
-            let pgs = pm.pagemap(&entry.region)?;
-            //eprintln!("pgs = {:x?}", pgs);
-            Ok((entry, pgs))
-        })
-        //.flatten()
-        .collect::<Vec<(MapsEntry, Vec<PageMapData>)>>();
-    //eprintln!("entries = {:#016x?}", entries);
-    eprintln!("count = {}", entries.len());
-
-    eprintln!(
-        "# present = {}",
-        //entries.iter().filter(|&p| p.present()).count()
-        entries
-            .iter()
-            .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.present()).count())
-            .sum::<usize>()
-    );
-    eprintln!(
-        "# swapped = {}",
-        //entries.iter().filter(|&p| p.swapped()).count()
-        entries
-            .iter()
-            .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.swapped()).count())
-            .sum::<usize>()
-    );
+    let entries = pm.pagemap()?;
+    eprintln!("\n\n{:#?}\n", entries);
 
     Ok(())
 }
