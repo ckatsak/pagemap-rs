@@ -1,11 +1,9 @@
-//#![allow(unused_variables)] // FIXME
-
 use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-////use std::path::PathBuf;
 
 use bitflags::bitflags;
+use caps::{CapSet, Capability};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -26,8 +24,8 @@ impl MemoryRegion {
     }
 
     #[inline(always)]
-    pub fn end_address(&self) -> u64 {
-        self.end
+    pub fn last_address(&self) -> u64 {
+        self.end - 1
     }
 
     #[inline(always)]
@@ -96,29 +94,6 @@ bitflags! {
     }
 }
 
-impl fmt::Display for PagePermissions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut ret = "---p".to_owned();
-        if *self != Self::EMPTY {
-            if *self & Self::READ == Self::READ {
-                ret.replace_range(0..1, "r");
-            }
-            if *self & Self::WRITE == Self::WRITE {
-                ret.replace_range(1..2, "w");
-            }
-            if *self & Self::EXECUTE == Self::EXECUTE {
-                ret.replace_range(2..3, "x");
-            }
-            if *self & Self::PRIVATE == Self::PRIVATE {
-                ret.replace_range(3..4, "p");
-            } else if *self & Self::SHARED == Self::SHARED {
-                ret.replace_range(3..4, "s");
-            }
-        }
-        write!(f, "{}", ret)
-    }
-}
-
 impl std::str::FromStr for PagePermissions {
     // This implementation never returns an error; in case of failure it panics. We therefore use
     // std::num::ParseIntError to be effortlessly compatible with the FromStr implementation for
@@ -142,6 +117,29 @@ impl std::str::FromStr for PagePermissions {
             panic!("invalid page permissions: '----'")
         }
         Ok(ret)
+    }
+}
+
+impl fmt::Display for PagePermissions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ret = "---p".to_owned();
+        if *self != Self::EMPTY {
+            if *self & Self::READ == Self::READ {
+                ret.replace_range(0..1, "r");
+            }
+            if *self & Self::WRITE == Self::WRITE {
+                ret.replace_range(1..2, "w");
+            }
+            if *self & Self::EXECUTE == Self::EXECUTE {
+                ret.replace_range(2..3, "x");
+            }
+            if *self & Self::PRIVATE == Self::PRIVATE {
+                ret.replace_range(3..4, "p");
+            } else if *self & Self::SHARED == Self::SHARED {
+                ret.replace_range(3..4, "s");
+            }
+        }
+        write!(f, "{}", ret)
     }
 }
 
@@ -248,71 +246,133 @@ impl fmt::Display for MapsEntry {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Clone, Copy)]
-pub struct PageMapData(u64);
+pub struct PageMapData {
+    pgmap: u64,
+    kpgcn: Option<u64>,
+    kpgfl: Option<u64>,
+}
 
 impl std::convert::From<u64> for PageMapData {
-    fn from(v: u64) -> Self {
-        PageMapData(v)
+    fn from(pgmap: u64) -> Self {
+        PageMapData {
+            pgmap,
+            kpgcn: None,
+            kpgfl: None,
+        }
+    }
+}
+
+/// TODO: Where to use?
+impl std::convert::From<(u64, u64, u64)> for PageMapData {
+    fn from((pgmap, kpgcn, kpgfl): (u64, u64, u64)) -> Self {
+        PageMapData {
+            pgmap,
+            kpgcn: Some(kpgcn),
+            kpgfl: Some(kpgfl),
+        }
     }
 }
 
 impl PageMapData {
-    pub fn raw(&self) -> u64 {
-        self.0
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // self.pgmap
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    /// The raw `u64` value as read from
+    /// [`procfs(5)`](https://man7.org/linux/man-pages/man5/proc.5.html).
+    #[inline(always)]
+    pub fn raw_pagemap(&self) -> u64 {
+        self.pgmap
     }
 
+    /// Returns `true` if `PRESENT` (bit 63) is set; `false` otherwise.
+    #[inline(always)]
     pub fn present(&self) -> bool {
-        self.0 & 1 << 63 != 0
+        self.pgmap & 1 << 63 != 0
     }
 
+    /// Returns `true` if `SWAP` (bit 62) is set; `false` otherwise.
+    #[inline(always)]
     pub fn swapped(&self) -> bool {
-        self.0 & 1 << 62 != 0
+        self.pgmap & 1 << 62 != 0
     }
 
+    /// Returns `true` if `FILE` (bit 61) is set; `false` otherwise.
+    #[inline(always)]
     pub fn file_mapped(&self) -> bool {
-        self.0 & 1 << 61 != 0
+        self.pgmap & 1 << 61 != 0
     }
 
+    /// Returns `true` if `FILE` (bit 61) is clear; `false` otherwise.
+    #[inline(always)]
     pub fn shared_anonymous(&self) -> bool {
         !self.file_mapped()
     }
 
+    /// Returns `true` if `MMAP_EXCLUSIVE` (bit 56) is set; `false` otherwise.
+    #[inline(always)]
     pub fn exclusively_mapped(&self) -> bool {
-        self.0 & 1 << 56 != 0
+        self.pgmap & 1 << 56 != 0
     }
 
+    /// Returns `true` if `SOFT_DIRTY` (bit 55) is set; `false` otherwise.
+    #[inline(always)]
     pub fn soft_dirty(&self) -> bool {
-        self.0 & 1 << 55 != 0
+        self.pgmap & 1 << 55 != 0
     }
 
+    /// Returns the page frame number (decoding bits 0-54) if `PRESENT` (bit 63) is set; otherwise
+    /// returns an error.
     // FIXME: custom error types!
     pub fn pfn(&self) -> Result<u64, anyhow::Error> {
         if !self.present() {
             Err(anyhow::anyhow!("Page is not present in RAM"))
         } else {
-            //Ok(self.0 & !(0x_ff80_u64 << 48))
-            //Ok(self.0 & 0x_007f_ffff_ffff_ffff_u64)
-            Ok(self.0 & ((1 << 55) - 1))
+            //Ok(self.pgmap & !(0x_ff80_u64 << 48))
+            //Ok(self.pgmap & 0x_007f_ffff_ffff_ffff_u64)
+            Ok(self.pgmap & ((1 << 55) - 1))
         }
     }
 
+    /// Returns the swap type (decoding bits 0-4) if `SWAP` (bit 62) is set; otherwise returns an
+    /// error.
     // FIXME: custom error types!
     pub fn swap_type(&self) -> Result<u8, anyhow::Error> {
         if !self.swapped() {
             Err(anyhow::anyhow!("Page is not swapped"))
         } else {
-            Ok((self.0 & 0x1fu64) as u8)
+            Ok((self.pgmap & 0x1fu64) as u8)
         }
     }
 
+    /// Returns the swap offset (decoding bits 5-55) if `SWAP` (bit 62) is set; otherwise returns
+    /// an error.
     // FIXME: custom error types!
     pub fn swap_offset(&self) -> Result<u64, anyhow::Error> {
         if !self.swapped() {
             Err(anyhow::anyhow!("Page is not swapped"))
         } else {
-            //Ok((self.0 & (0x_00ff_ffff_ffff_ffe0_u64)) >> 5)
-            Ok((self.0 & (0x_007f_ffff_ffff_ffe0_u64)) >> 5)
+            //Ok((self.pgmap & (0x_00ff_ffff_ffff_ffe0_u64)) >> 5)
+            Ok((self.pgmap & (0x_007f_ffff_ffff_ffe0_u64)) >> 5)
         }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // self.kpgcn
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    #[inline(always)]
+    pub fn raw_kpagecount(&self) -> Option<u64> {
+        self.kpgcn
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // self.kpgfl
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    #[inline(always)]
+    pub fn raw_kpageflags(&self) -> Option<u64> {
+        self.kpgfl
     }
 }
 
@@ -348,37 +408,6 @@ impl fmt::Display for PageMapData {
                 )
             }
         }
-        //if self.present() && self.swapped() {
-        //    // present = 1, swapped = 1
-        //    write!(f, "PAGE BOTH PRESENT AND SWAPPED!") // FIXME
-        //} else if self.present() {
-        //    // present = 1, swapped = 0
-        //    write!(
-        //        f,
-        //        "PageMapData{{ present: {}; swapped: {}; file-mapped: {}; exclusively-mapped: {}; soft_dirty: {}; pfn: {:x} }}",
-        //        self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
-        //        self.soft_dirty(), self.pfn().unwrap(), // Safe because self.present() == true
-        //    )
-        //} else if self.swapped() {
-        //    // present = 0, swapped = 1
-        //    write!(
-        //        f,
-        //        "PageMapData{{ present: {}; swapped: {}; file-mapped: {}; exclusively-mapped: {}; soft_dirty: {}; swap-type: {}; swap-offset: {} }}",
-        //        self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
-        //        self.soft_dirty(), self.swap_type().unwrap(), self.swap_offset().unwrap(),
-        //    )
-        //} else {
-        //    // present = 0, swapped = 0
-        //    write!(
-        //        f,
-        //        "PageMapData{{ present: {}; swapped: {}; file-mapped: {}; exclusively-mapped: {}; soft_dirty: {} }}",
-        //        self.present(),
-        //        self.swapped(),
-        //        self.file_mapped(),
-        //        self.exclusively_mapped(),
-        //        self.soft_dirty(),
-        //    )
-        //}
     }
 }
 
@@ -392,21 +421,34 @@ impl fmt::Display for PageMapData {
 pub struct PageMap {
     pid: u64,
     mf: BufReader<File>,
-    pmf: BufReader<File>,
+    pmf: BufReader<File>, // FIXME: BufReader
+    kcf: Option<File>,
+    kff: Option<File>,
     page_size: u64,
 }
 
 impl PageMap {
     // FIXME: define custom error type to return
-    pub fn new(pid: u64) -> anyhow::Result<Self> {
+    pub fn new(pid: u64) -> Result<Self, anyhow::Error> {
+        let (kcf, kff) = if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
+            (
+                Some(File::open("/proc/kpagecount")?),
+                Some(File::open("/proc/kpageflags")?),
+            )
+        } else {
+            (None, None)
+        };
         Ok(PageMap {
             pid,
             mf: BufReader::new(File::open(format!("/proc/{}/maps", pid))?),
             pmf: BufReader::new(File::open(format!("/proc/{}/pagemap", pid))?),
-            page_size: page_size(),
+            kcf,
+            kff,
+            page_size: page_size()?,
         })
     }
 
+    /// Returns the `PID` of the process that this `PageMap` refers.
     pub fn pid(&self) -> u64 {
         self.pid
     }
@@ -421,7 +463,10 @@ impl PageMap {
     }
 
     // FIXME: define custom error type to return
-    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> anyhow::Result<Vec<PageMapData>> {
+    pub fn pagemap_region(
+        &mut self,
+        region: &MemoryRegion,
+    ) -> Result<Vec<PageMapData>, anyhow::Error> {
         //eprintln!(
         //    "region = {}; count = {}",
         //    region,
@@ -448,19 +493,65 @@ impl PageMap {
 
     // FIXME: define custom error type to return
     pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapData>)>, anyhow::Error> {
-        self.maps()?
-            .iter()
-            .map(|map_entry| Ok((map_entry.clone(), self.pagemap_region(&map_entry.region)?)))
-            .collect()
-        //
         //self.maps()?
         //    .iter()
-        //    .map(
-        //        |map_entry| -> Result<(MapsEntry, Vec<PageMapData>), anyhow::Error> {
-        //            Ok((map_entry.clone(), self.pagemap_region(&map_entry.region)?))
-        //        },
-        //    )
+        //    .map(|map_entry| Ok((map_entry.clone(), self.pagemap_region(&map_entry.region)?)))
         //    .collect()
+        self.maps()?
+            .into_iter()
+            .map(|map_entry| {
+                let mut pmds = self.pagemap_region(&map_entry.region)?;
+                if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
+                    eprintln!("we have CAP_SYS_ADMIN");
+                    for pmd in &mut pmds {
+                        if let Ok(pfn) = pmd.pfn() {
+                            //pmd.kpgcn = self.kpagecount(pfn);
+                            //pmd.kpgfl = self.kpageflags(pfn);
+                            pmd.kpgcn = Some(self.kpagecount(pfn)?);
+                            pmd.kpgfl = Some(self.kpageflags(pfn)?);
+                        }
+                    }
+                }
+                Ok((map_entry, pmds))
+            })
+            .collect()
+    }
+
+    //pub fn kpagecount(&mut self, pfn: u64) -> Option<u64> {
+    //    let mut buf = [0; 8];
+    //    self.kcf.as_ref()?.seek(SeekFrom::Start(pfn * 8)).ok()?; // XXX: how should this be handled?
+    //    self.kcf.as_ref()?.read_exact(&mut buf).ok()?;
+    //    Some(u64::from_ne_bytes(buf))
+    //}
+    pub fn kpagecount(&self, pfn: u64) -> Result<u64, anyhow::Error> {
+        let mut buf = [0; 8];
+        //self.kcf
+        //    .ok_or_else(|| anyhow::anyhow!("kcf is None!"))?
+        //    .seek(SeekFrom::Start(pfn * 8))?;
+        let mut kcf = self
+            .kcf
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("kcf is None!"))?; // FIXME: error type
+        kcf.seek(SeekFrom::Start(pfn * 8))?;
+        kcf.read_exact(&mut buf)?;
+        Ok(u64::from_ne_bytes(buf))
+    }
+
+    //pub fn kpageflags(&self, pfn: u64) -> Option<u64> {
+    //    let mut buf = [0; 8];
+    //    self.kff.as_ref()?.seek(SeekFrom::Start(pfn * 8)).ok()?; // XXX: how should this be handled?
+    //    self.kff.as_ref()?.read_exact(&mut buf).ok()?;
+    //    Some(u64::from_ne_bytes(buf))
+    //}
+    pub fn kpageflags(&self, pfn: u64) -> Result<u64, anyhow::Error> {
+        let mut buf = [0; 8];
+        let mut kff = self
+            .kff
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("kff is None!"))?; // FIXME: error type
+        kff.seek(SeekFrom::Start(pfn * 8))?;
+        kff.read_exact(&mut buf)?;
+        Ok(u64::from_ne_bytes(buf))
     }
 }
 
@@ -470,8 +561,12 @@ impl PageMap {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-pub fn page_size() -> u64 {
-    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as u64 } // FIXME: error handling
+// FIXME: define custom error type to return
+pub fn page_size() -> Result<u64, std::io::Error> {
+    match unsafe { libc::sysconf(libc::_SC_PAGESIZE) } {
+        -1 => Err(std::io::Error::last_os_error()),
+        sz => Ok(sz as u64),
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -486,60 +581,6 @@ fn parse_args() -> u64 {
 
 fn main() -> anyhow::Result<()> {
     let pid = parse_args();
-    //// let page_size = page_size();
-
-    //// let maps_path = PathBuf::from(format!("/proc/{}/maps", pid));
-    //// let pagemap_path = PathBuf::from(format!("/proc/{}/pagemap", pid));
-
-    //// let maps = BufReader::new(File::open(&maps_path)?);
-    //// let pagemap = BufReader::new(File::open(&pagemap_path)?);
-
-    //// //let maps_entries: Vec<MapsEntry> = maps
-    //// //    .lines()
-    //// //    .map(|line| line.unwrap().parse())
-    //// //    .collect::<Result<_, _>>()?;
-    //// //for (i, entry) in maps_entries.iter().enumerate() {
-    //// //    eprintln!("{:4}: {}", i, entry);
-    //// //}
-
-    //// let mut pm = PageMap::new(pid)?;
-    //// //let e1 = maps_entries
-    //// //    .get(0)
-    //// //    .ok_or_else(|| anyhow::anyhow!("maps_entries empty!"))?;
-    //// ////let r1 = &e1.region;
-    //// //let p = pm.pagemap(&e1.region)?;
-    //// //eprintln!("p = {:x?}", p);
-
-    //// let entries = maps
-    ////     .lines()
-    ////     //.flat_map(|line| pm.pagemap(line.unwrap().parse::<MapsEntry>()?.region))
-    ////     .flat_map(|line| -> Result<_, anyhow::Error> {
-    ////         let entry = line.unwrap().parse::<MapsEntry>()?;
-    ////         let pgs = pm.pagemap_region(&entry.region)?;
-    ////         //eprintln!("pgs = {:x?}", pgs);
-    ////         Ok((entry, pgs))
-    ////     })
-    ////     //.flatten()
-    ////     .collect::<Vec<(MapsEntry, Vec<PageMapData>)>>();
-    //// //eprintln!("entries = {:#016x?}", entries);
-    //// eprintln!("count = {}", entries.len());
-
-    //// eprintln!(
-    ////     "# present = {}",
-    ////     //entries.iter().filter(|&p| p.present()).count()
-    ////     entries
-    ////         .iter()
-    ////         .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.present()).count())
-    ////         .sum::<usize>()
-    //// );
-    //// eprintln!(
-    ////     "# swapped = {}",
-    ////     //entries.iter().filter(|&p| p.swapped()).count()
-    ////     entries
-    ////         .iter()
-    ////         .map(|(_, pmds)| pmds.iter().filter(|&pmd| pmd.swapped()).count())
-    ////         .sum::<usize>()
-    //// );
 
     let mut pm = PageMap::new(pid)?;
     let entries = pm.pagemap()?;

@@ -9,5 +9,6 @@ edition = "2018"
 [dependencies]
 anyhow = "1"
 bitflags = "1.2"
-hex = "0.4"
+caps = "0.5"
+#hex = "0.4"
 libc = "0.2"
