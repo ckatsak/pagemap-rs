@@ -12,7 +12,7 @@ use caps::{CapSet, Capability};
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 bitflags! {
-    /// kpageflags as defined on Linux, at `include/uapi/linux/kernel-page-flags.h`.
+    /// kpageflags as defined in Linux, at `include/uapi/linux/kernel-page-flags.h`.
     pub struct KPageFlags: u64 {
         const KPF_LOCKED        = 1 << 0;
         const KPF_ERROR         = 1 << 1;
@@ -323,6 +323,18 @@ impl std::convert::From<(u64, u64, u64)> for PageMapData {
 
 impl PageMapData {
     ///////////////////////////////////////////////////////////////////////////////////////////
+    // pagemap constants as defined in Linux, at `fs/proc/task_mmu.c`
+    ///////////////////////////////////////////////////////////////////////////////////////////
+
+    pub const PM_PFRAME_BITS: u64 = 55;
+    pub const PM_PFRAME_MASK: u64 = (1 << Self::PM_PFRAME_BITS) - 1;
+    pub const PM_SOFT_DIRTY: u64 = 55;
+    pub const PM_MMAP_EXCLUSIVE: u64 = 56;
+    pub const PM_FILE: u64 = 61;
+    pub const PM_SWAP: u64 = 62;
+    pub const PM_PRESENT: u64 = 63;
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
     // /proc/PID/pagemap
     ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -332,40 +344,40 @@ impl PageMapData {
         self.pgmap
     }
 
-    /// Returns `true` if `PRESENT` (bit 63) is set; `false` otherwise.
+    /// Returns `true` if the `PM_PRESENT` bit is set; `false` otherwise.
     #[inline(always)]
     pub fn present(&self) -> bool {
-        self.pgmap & 1 << 63 != 0
+        self.pgmap >> Self::PM_PRESENT & 1 == 1
     }
 
-    /// Returns `true` if `SWAP` (bit 62) is set; `false` otherwise.
+    /// Returns `true` if the `PM_SWAP` bit is set; `false` otherwise.
     #[inline(always)]
     pub fn swapped(&self) -> bool {
-        self.pgmap & 1 << 62 != 0
+        self.pgmap >> Self::PM_SWAP & 1 == 1
     }
 
-    /// Returns `true` if `FILE` (bit 61) is set; `false` otherwise.
+    /// Returns `true` if the `PM_FILE` bit is set; `false` otherwise.
     #[inline(always)]
     pub fn file_mapped(&self) -> bool {
-        self.pgmap & 1 << 61 != 0
+        self.pgmap >> Self::PM_FILE & 1 == 1
     }
 
-    /// Returns `true` if `FILE` (bit 61) is clear; `false` otherwise.
+    /// Returns `true` if the `PM_FILE` bit is clear; `false` otherwise.
     #[inline(always)]
     pub fn shared_anonymous(&self) -> bool {
-        !self.file_mapped()
+        self.pgmap >> Self::PM_FILE & 1 == 0
     }
 
-    /// Returns `true` if `MMAP_EXCLUSIVE` (bit 56) is set; `false` otherwise.
+    /// Returns `true` if the `PM_MMAP_EXCLUSIVE` bit is set; `false` otherwise.
     #[inline(always)]
     pub fn exclusively_mapped(&self) -> bool {
-        self.pgmap & 1 << 56 != 0
+        self.pgmap >> Self::PM_MMAP_EXCLUSIVE & 1 == 1
     }
 
-    /// Returns `true` if `SOFT_DIRTY` (bit 55) is set; `false` otherwise.
+    /// Returns `true` if the `PM_SOFT_DIRTY` bit is set; `false` otherwise.
     #[inline(always)]
     pub fn soft_dirty(&self) -> bool {
-        self.pgmap & 1 << 55 != 0
+        self.pgmap >> Self::PM_SOFT_DIRTY & 1 == 1
     }
 
     /// Returns the page frame number (decoding bits 0-54) if `PRESENT` (bit 63) is set; otherwise
@@ -375,8 +387,7 @@ impl PageMapData {
         if !self.present() {
             Err(anyhow::anyhow!("Page is not present in RAM"))
         } else {
-            //Ok(self.pgmap & 0x_007f_ffff_ffff_ffff_u64)
-            Ok(self.pgmap & ((1 << 55) - 1))
+            Ok(self.pgmap & Self::PM_PFRAME_MASK)
         }
     }
 
