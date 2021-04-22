@@ -105,6 +105,23 @@ bitflags! {
     }
 }
 
+impl std::convert::From<u64> for KPageFlags {
+    fn from(v: u64) -> Self {
+        KPageFlags::from_bits_truncate(v)
+    }
+}
+
+macro_rules! fn_get_bit {
+    ($fn:ident, $bit:ident) => {
+        /// Returns `Some(true)` if the corresponding bit is set; `Some(false)` otherwise. It
+        /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
+        #[inline(always)]
+        pub fn $fn(&self) -> Option<bool> {
+            self.kpgfl.map(|v| v.contains(KPageFlags::$bit))
+        }
+    };
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // MemoryRegion
@@ -349,7 +366,7 @@ impl fmt::Display for MapsEntry {
 pub struct PageMapData {
     pgmap: u64,
     kpgcn: Option<u64>,
-    kpgfl: Option<u64>,
+    kpgfl: Option<KPageFlags>,
 }
 
 impl std::convert::From<u64> for PageMapData {
@@ -368,7 +385,7 @@ impl std::convert::From<(u64, u64, u64)> for PageMapData {
         PageMapData {
             pgmap,
             kpgcn: Some(kpgcn),
-            kpgfl: Some(kpgfl),
+            kpgfl: Some(kpgfl.into()),
         }
     }
 }
@@ -474,197 +491,233 @@ impl PageMapData {
     /// [`procfs(5)`](https://man7.org/linux/man-pages/man5/proc.5.html).
     #[inline(always)]
     pub fn raw_kpageflags(&self) -> Option<u64> {
-        self.kpgfl
+        self.kpgfl.map(|kpgfl| KPageFlags::bits(&kpgfl))
     }
+
+    fn_get_bit!(locked, KPF_LOCKED);
+    fn_get_bit!(error, KPF_ERROR);
+    fn_get_bit!(referenced, KPF_REFERENCED);
+    fn_get_bit!(uptodate, KPF_UPTODATE);
+    fn_get_bit!(dirty, KPF_DIRTY);
+    fn_get_bit!(lru, KPF_LRU);
+    fn_get_bit!(active, KPF_ACTIVE);
+    fn_get_bit!(slab, KPF_SLAB);
+    fn_get_bit!(writeback, KPF_WRITEBACK);
+    fn_get_bit!(reclaim, KPF_RECLAIM);
+    fn_get_bit!(buddy, KPF_BUDDY);
+    fn_get_bit!(mmap, KPF_MMAP);
+    fn_get_bit!(anon, KPF_ANON);
+    fn_get_bit!(swapcache, KPF_SWAPCACHE);
+    fn_get_bit!(swapbacked, KPF_SWAPBACKED);
+    fn_get_bit!(compound_head, KPF_COMPOUND_HEAD);
+    fn_get_bit!(compound_tail, KPF_COMPOUND_TAIL);
+    fn_get_bit!(huge, KPF_HUGE);
+    fn_get_bit!(unevictable, KPF_UNEVICTABLE);
+    fn_get_bit!(hwpoison, KPF_HWPOISON);
+    fn_get_bit!(nopage, KPF_NOPAGE);
+    fn_get_bit!(ksm, KPF_KSM);
+    fn_get_bit!(thp, KPF_THP);
+    fn_get_bit!(offline, KPF_OFFLINE);
+    fn_get_bit!(zero_page, KPF_ZERO_PAGE);
+    fn_get_bit!(idle, KPF_IDLE);
+    fn_get_bit!(pgtable, KPF_PGTABLE);
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // vv  TO_DELETE  vv
+    ///////////////////////////////////////////////////////////////////////////////////////////
 
     /// Returns `Some(true)` if `KPF_LOCKED` (bit 0) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn locked(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_LOCKED) & 1 == 1)
+    pub fn is_locked(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_LOCKED) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_ERROR` (bit 1) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn error(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_ERROR) & 1 == 1)
+    pub fn is_error(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_ERROR) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_REFERENCED` (bit 2) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn referenced(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_REFERENCED) & 1 == 1)
+    pub fn is_referenced(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_REFERENCED) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_UPTODATE` (bit 3) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn uptodate(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_UPTODATE) & 1 == 1)
+    pub fn is_uptodate(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_UPTODATE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_DIRTY` (bit 4) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn dirty(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_DIRTY) & 1 == 1)
+    pub fn is_dirty(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_DIRTY) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_LRU` (bit 5) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn lru(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_LRU) & 1 == 1)
+    pub fn is_lru(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_LRU) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_ACTIVE` (bit 6) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn active(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_ACTIVE) & 1 == 1)
+    pub fn is_active(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_ACTIVE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_SLAB (bit 7) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn slab(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_SLAB) & 1 == 1)
+    pub fn is_slab(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_SLAB) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_WRITEBACK` (bit 8) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn writeback(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_WRITEBACK) & 1 == 1)
+    pub fn is_writeback(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_WRITEBACK) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_RECLAIM` (bit 9) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn reclaim(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_RECLAIM) & 1 == 1)
+    pub fn is_reclaim(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_RECLAIM) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_BUDDY` (bit 10) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn buddy(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_BUDDY) & 1 == 1)
+    pub fn is_buddy(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_BUDDY) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_MMAP` (bit 11) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn mmap(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_MMAP) & 1 == 1)
+    pub fn is_mmap(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_MMAP) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_ANON` (bit 12) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn anon(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_ANON) & 1 == 1)
+    pub fn is_anon(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_ANON) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_SWAPCACHE` (bit 13) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn swapcache(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_SWAPCACHE) & 1 == 1)
+    pub fn is_swapcache(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_SWAPCACHE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_SWAPBACKED` (bit 14) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn swapbacked(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_SWAPBACKED) & 1 == 1)
+    pub fn is_swapbacked(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_SWAPBACKED) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_COMPOUND_HEAD` (bit 15) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn compound_head(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_COMPOUND_HEAD) & 1 == 1)
+    pub fn is_compound_head(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_COMPOUND_HEAD) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_COMPOUND_TAIL` (bit 16) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn compound_tail(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_COMPOUND_TAIL) & 1 == 1)
+    pub fn is_compound_tail(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_COMPOUND_TAIL) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_HUGE` (bit 17) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn huge(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_HUGE) & 1 == 1)
+    pub fn is_huge(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_HUGE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_UNEVICTABLE` (bit 18) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn unevictable(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_UNEVICTABLE) & 1 == 1)
+    pub fn is_unevictable(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_UNEVICTABLE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_HWPOISON` (bit 19) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn hwpoison(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_HWPOISON) & 1 == 1)
+    pub fn is_hwpoison(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_HWPOISON) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_NOPAGE` (bit 20) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn nopage(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_NOPAGE) & 1 == 1)
+    pub fn is_nopage(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_NOPAGE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_KSM` (bit 21) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn ksm(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_KSM) & 1 == 1)
+    pub fn is_ksm(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_KSM) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_THP` (bit 22) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn thp(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_THP) & 1 == 1)
+    pub fn is_thp(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_THP) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_OFFLINE` (bit 23) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn offline(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_OFFLINE) & 1 == 1)
+    pub fn is_offline(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_OFFLINE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_ZERO_PAGE` (bit 24) is set; `Some(false)` otherwise. It
     /// returns `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn zero_page(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_ZERO_PAGE) & 1 == 1)
+    pub fn is_zero_page(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_ZERO_PAGE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_IDLE` (bit 25) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn idle(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_IDLE) & 1 == 1)
+    pub fn is_idle(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_IDLE) & 1 == 1)
     }
 
     /// Returns `Some(true)` if `KPF_PGTABLE` (bit 26) is set; `Some(false)` otherwise. It returns
     /// `None` if `/proc/kpageflags` could not be read for the page at hand.
     #[inline(always)]
-    pub fn pgtable(&self) -> Option<bool> {
-        self.kpgfl.map(|v| (v >> KPF_PGTABLE) & 1 == 1)
+    pub fn is_pgtable(&self) -> Option<bool> {
+        self.kpgfl.map(|v| (v.bits() >> KPF_PGTABLE) & 1 == 1)
     }
+
+    ///////////////////////////////////////////////////////////////////////////////////////////
+    // ^^  TO_DELETE  ^^
+    ///////////////////////////////////////////////////////////////////////////////////////////
 }
 
 impl fmt::Display for PageMapData {
@@ -814,7 +867,7 @@ impl PageMap {
     /// - `self.kcf` is `None`
     /// - seek failure
     /// - read failure
-    pub fn kpageflags(&self, pfn: u64) -> Result<u64, anyhow::Error> {
+    pub fn kpageflags(&self, pfn: u64) -> Result<KPageFlags, anyhow::Error> {
         let mut buf = [0; 8];
         let mut kff = self
             .kff
@@ -822,7 +875,7 @@ impl PageMap {
             .ok_or_else(|| anyhow::anyhow!("kff is None!"))?; // FIXME: error type
         kff.seek(SeekFrom::Start(pfn * 8))?;
         kff.read_exact(&mut buf)?;
-        Ok(u64::from_ne_bytes(buf))
+        Ok(KPageFlags::from_bits_truncate(u64::from_ne_bytes(buf)))
     }
 }
 
@@ -907,5 +960,43 @@ mod tests {
             eprintln!("pretty entry = {}\n", entry);
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_kpgfl() {
+        let f = KPageFlags::KPF_ANON
+            | KPageFlags::KPF_PGTABLE
+            | KPageFlags::KPF_DIRTY
+            | KPageFlags::KPF_LRU
+            | KPageFlags::KPF_SWAPBACKED;
+        let pmd: PageMapData = (42, 42, f.bits()).into();
+
+        assert_eq!(pmd.is_locked(), pmd.locked());
+        assert_eq!(pmd.is_error(), pmd.error());
+        assert_eq!(pmd.is_referenced(), pmd.referenced());
+        assert_eq!(pmd.is_uptodate(), pmd.uptodate());
+        assert_eq!(pmd.is_dirty(), pmd.dirty());
+        assert_eq!(pmd.is_lru(), pmd.lru());
+        assert_eq!(pmd.is_active(), pmd.active());
+        assert_eq!(pmd.is_slab(), pmd.slab());
+        assert_eq!(pmd.is_writeback(), pmd.writeback());
+        assert_eq!(pmd.is_reclaim(), pmd.reclaim());
+        assert_eq!(pmd.is_buddy(), pmd.buddy());
+        assert_eq!(pmd.is_mmap(), pmd.mmap());
+        assert_eq!(pmd.is_anon(), pmd.anon());
+        assert_eq!(pmd.is_swapcache(), pmd.swapcache());
+        assert_eq!(pmd.is_swapbacked(), pmd.swapbacked());
+        assert_eq!(pmd.is_compound_head(), pmd.compound_head());
+        assert_eq!(pmd.is_compound_tail(), pmd.compound_tail());
+        assert_eq!(pmd.is_huge(), pmd.huge());
+        assert_eq!(pmd.is_unevictable(), pmd.unevictable());
+        assert_eq!(pmd.is_hwpoison(), pmd.hwpoison());
+        assert_eq!(pmd.is_nopage(), pmd.nopage());
+        assert_eq!(pmd.is_ksm(), pmd.ksm());
+        assert_eq!(pmd.is_thp(), pmd.thp());
+        assert_eq!(pmd.is_offline(), pmd.offline());
+        assert_eq!(pmd.is_zero_page(), pmd.zero_page());
+        assert_eq!(pmd.is_idle(), pmd.idle());
+        assert_eq!(pmd.is_pgtable(), pmd.pgtable());
     }
 }
