@@ -143,12 +143,10 @@ impl fmt::Display for MemoryRegion {
 bitflags! {
     #[derive(Default)]
     pub struct PagePermissions: u8 {
-        const EMPTY = 0; // FIXME?
-        const READ = 1;
-        const WRITE = 2;
-        const EXECUTE = 4;
-        const SHARED = 8;
-        const PRIVATE = 16;
+        const READ    = 1 << 0;
+        const WRITE   = 1 << 1;
+        const EXECUTE = 1 << 2;
+        const SHARED  = 1 << 3;
     }
 }
 
@@ -165,14 +163,10 @@ impl std::str::FromStr for PagePermissions {
                 'r' => Self::READ,
                 'w' => Self::WRITE,
                 'x' => Self::EXECUTE,
-                'p' => Self::PRIVATE,
                 's' => Self::SHARED,
-                '-' => Self::EMPTY,
+                'p' | '-' => Self::empty(),
                 _ => panic!("invalid page permissions"),
             }
-        }
-        if ret == Self::EMPTY {
-            panic!("invalid page permissions: '----'")
         }
         Ok(ret)
     }
@@ -181,21 +175,17 @@ impl std::str::FromStr for PagePermissions {
 impl fmt::Display for PagePermissions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut ret = "---p".to_owned();
-        if *self != Self::EMPTY {
-            if *self & Self::READ == Self::READ {
-                ret.replace_range(0..1, "r");
-            }
-            if *self & Self::WRITE == Self::WRITE {
-                ret.replace_range(1..2, "w");
-            }
-            if *self & Self::EXECUTE == Self::EXECUTE {
-                ret.replace_range(2..3, "x");
-            }
-            if *self & Self::PRIVATE == Self::PRIVATE {
-                ret.replace_range(3..4, "p");
-            } else if *self & Self::SHARED == Self::SHARED {
-                ret.replace_range(3..4, "s");
-            }
+        if self.contains(Self::READ) {
+            ret.replace_range(0..1, "r");
+        }
+        if self.contains(Self::WRITE) {
+            ret.replace_range(1..2, "w");
+        }
+        if self.contains(Self::EXECUTE) {
+            ret.replace_range(2..3, "x");
+        }
+        if self.contains(Self::SHARED) {
+            ret.replace_range(3..4, "s");
         }
         write!(f, "{}", ret)
     }
@@ -675,8 +665,9 @@ mod tests {
             "---s", "---p", "r--s", "r--p", "rw-s", "-w-s", "-w-p", "--xs", "--xp", "rw-p", "r-xp",
         ];
         for p in perms {
+            eprint!("{:#?}  -->  ", p);
             let pp = p.parse::<PagePermissions>().unwrap();
-            eprintln!("pp = {:?}", pp);
+            eprintln!("{:?}", pp);
             assert_eq!(format!("{}", pp), p);
         }
     }
