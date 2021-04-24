@@ -1,9 +1,69 @@
 use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 
 use bitflags::bitflags;
 use caps::{CapSet, Capability};
+use thiserror::Error;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// PageMapError
+//
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Debug, Error)]
+pub enum PageMapError {
+    /// Bit `PM_PRESENT` is not set.
+    #[error("page is not present")]
+    PageNotPresent,
+
+    /// Bit `PM_SWAP` is not set.
+    #[error("page is not swapped")]
+    PageNotSwapped,
+
+    /// Error opening a file.
+    #[error("could not open '{path}': {source}")]
+    Open { path: String, source: io::Error },
+
+    /// Error reading from a file.
+    #[error("could not read '{path}': {source}")]
+    Read { path: String, source: io::Error },
+
+    /// Error seeking in a file.
+    #[error("could not seek in '{path}': {source}")]
+    Seek { path: String, source: io::Error },
+
+    /// Error accessing a file.
+    #[error("could not access file '{0}'")]
+    Access(String),
+
+    /// Generic I/O error.
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
+
+    /// Error retrieving `capabilities(7)`.
+    #[error(transparent)]
+    CapsError(#[from] caps::errors::CapsError),
+
+    /// Error parsing [`MemoryRegion`].
+    #[error("could not parse MemoryRegion from the given addresses: {0}")]
+    ParseMemoryRegion(std::num::ParseIntError),
+
+    /// Error parsing [`PagePermissions`].
+    #[error("could not parse valid PagePermissions from '{0}'")]
+    ParsePagePermissions(String),
+
+    /// Error parsing [`DeviceNumbers`].
+    #[error("could not parse valid DeviceNumbers from '{0}'")]
+    ParseDeviceNumbers(String),
+
+    /// Generic integer parsing error.
+    #[error(transparent)]
+    ParseIntError(#[from] std::num::ParseIntError),
+}
+
+pub type Result<T> = std::result::Result<T, PageMapError>;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -111,13 +171,13 @@ impl std::convert::From<(u64, u64)> for MemoryRegion {
 }
 
 impl std::str::FromStr for MemoryRegion {
-    type Err = std::num::ParseIntError;
+    type Err = PageMapError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         let r: Vec<_> = s
             .splitn(2, '-')
-            .map(|addr| u64::from_str_radix(addr, 16))
-            .collect::<Result<_, _>>()?;
+            .map(|addr| u64::from_str_radix(addr, 16).map_err(PageMapError::ParseMemoryRegion))
+            .collect::<Result<_>>()?;
         Ok((r[0], r[1]).into())
     }
 }
@@ -151,13 +211,15 @@ bitflags! {
 }
 
 impl std::str::FromStr for PagePermissions {
-    // This implementation never returns an error; in case of failure it panics. We therefore use
-    // std::num::ParseIntError to be effortlessly compatible with the FromStr implementation for
-    // MapsEntry.
-    type Err = std::num::ParseIntError;
+    type Err = PageMapError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut ret = Default::default();
+    // FIXME: This is a quick and dirty implementation, which would currently allow weird patterns,
+    // like '----', 'wprx', etc.
+    fn from_str(s: &str) -> Result<Self> {
+        if s.len() != 4 {
+            return Err(PageMapError::ParsePagePermissions(s.into()));
+        }
+        let mut ret: PagePermissions = Default::default();
         for c in s.chars() {
             ret |= match c {
                 'r' => Self::READ,
@@ -165,9 +227,10 @@ impl std::str::FromStr for PagePermissions {
                 'x' => Self::EXECUTE,
                 's' => Self::SHARED,
                 'p' | '-' => Self::empty(),
-                _ => panic!("invalid page permissions"),
+                _ => return Err(PageMapError::ParsePagePermissions(s.into())),
             }
         }
+        //if ret.is_empty() { Err(PageMapError::ParsePagePermissions(s.into())) } else { Ok(ret) }
         Ok(ret)
     }
 }
@@ -227,13 +290,16 @@ impl std::convert::From<(u32, u32)> for DeviceNumbers {
 }
 
 impl std::str::FromStr for DeviceNumbers {
-    type Err = std::num::ParseIntError;
+    type Err = PageMapError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         let p: Vec<_> = s
             .splitn(2, ':')
-            .map(|addr| u32::from_str_radix(addr, 16))
-            .collect::<Result<_, _>>()?;
+            .map(|addr| {
+                u32::from_str_radix(addr, 16)
+                    .map_err(|_| PageMapError::ParseDeviceNumbers(s.into()))
+            })
+            .collect::<Result<_>>()?;
         Ok((p[0], p[1]).into())
     }
 }
@@ -254,16 +320,16 @@ impl fmt::Display for DeviceNumbers {
 pub struct MapsEntry {
     region: MemoryRegion,
     perms: PagePermissions,
-    offset: u64, // FIXME?
+    offset: u64,
     dev: DeviceNumbers,
     inode: u64,
     pathname: Option<String>,
 }
 
 impl std::str::FromStr for MapsEntry {
-    type Err = std::num::ParseIntError;
+    type Err = PageMapError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         let s: Vec<_> = s.split_ascii_whitespace().collect();
         Ok(MapsEntry {
             region: s[0].parse()?,
@@ -380,34 +446,31 @@ impl PageMapData {
         self.pgmap >> Self::PM_SOFT_DIRTY & 1 == 1
     }
 
-    /// Returns the page frame number (decoding bits 0-54) if `PRESENT` (bit 63) is set; otherwise
-    /// returns an error.
-    // FIXME: custom error types!
-    pub fn pfn(&self) -> Result<u64, anyhow::Error> {
+    /// Returns the page frame number (decoding bits 0-54) if the `PM_PRESENT` bit is set;
+    /// otherwise returns an error.
+    pub fn pfn(&self) -> Result<u64> {
         if !self.present() {
-            Err(anyhow::anyhow!("Page is not present in RAM"))
+            Err(PageMapError::PageNotPresent)
         } else {
             Ok(self.pgmap & Self::PM_PFRAME_MASK)
         }
     }
 
-    /// Returns the swap type (decoding bits 0-4) if `SWAP` (bit 62) is set; otherwise returns an
+    /// Returns the swap type (decoding bits 0-4) if the `PM_SWAP` bit is set; otherwise returns an
     /// error.
-    // FIXME: custom error types!
-    pub fn swap_type(&self) -> Result<u8, anyhow::Error> {
+    pub fn swap_type(&self) -> Result<u8> {
         if !self.swapped() {
-            Err(anyhow::anyhow!("Page is not swapped"))
+            Err(PageMapError::PageNotSwapped)
         } else {
             Ok((self.pgmap & 0x1fu64) as u8)
         }
     }
 
-    /// Returns the swap offset (decoding bits 5-55) if `SWAP` (bit 62) is set; otherwise returns
+    /// Returns the swap offset (decoding bits 5-55) if the `PM_SWAP` bit is set; otherwise returns
     /// an error.
-    // FIXME: custom error types!
-    pub fn swap_offset(&self) -> Result<u64, anyhow::Error> {
+    pub fn swap_offset(&self) -> Result<u64> {
         if !self.swapped() {
-            Err(anyhow::anyhow!("Page is not swapped"))
+            Err(PageMapError::PageNotSwapped)
         } else {
             Ok((self.pgmap & (0x_007f_ffff_ffff_ffe0_u64)) >> 5)
         }
@@ -470,13 +533,11 @@ impl PageMapData {
 impl fmt::Display for PageMapData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.present(), self.swapped()) {
-            (true, true) => {
-                write!(f, "PAGE BOTH PRESENT AND SWAPPED!") // FIXME
-            }
+            (true, true) => panic!("PAGE BOTH PRESENT AND SWAPPED!"), // FIXME
             (true, false) => {
                 write!(
                     f,
-                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; pfn: {:x} }}",
+                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; pfn: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
                     self.soft_dirty(), self.pfn().unwrap(), // Safe because self.present() == true
                 )
@@ -484,7 +545,7 @@ impl fmt::Display for PageMapData {
             (false, true) => {
                 write!(
                     f,
-                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; swap_type: {}; swap_offset: {} }}",
+                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; swap_type: {}; swap_offset: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
                     self.soft_dirty(), self.swap_type().unwrap(), self.swap_offset().unwrap(),
                     // Safe to unwrap because self.swapped() == true
@@ -519,20 +580,45 @@ pub struct PageMap {
 }
 
 impl PageMap {
-    // FIXME: define custom error type to return
-    pub fn new(pid: u64) -> Result<Self, anyhow::Error> {
+    const KPAGECOUNT: &'static str = "/proc/kpagecount";
+    const KPAGEFLAGS: &'static str = "/proc/kpageflags";
+
+    pub fn new(pid: u64) -> Result<Self> {
         let (kcf, kff) = if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
             (
-                Some(File::open("/proc/kpagecount")?),
-                Some(File::open("/proc/kpageflags")?),
+                Some(
+                    File::open(Self::KPAGECOUNT).map_err(|e| PageMapError::Open {
+                        path: Self::KPAGECOUNT.into(),
+                        source: e,
+                    })?,
+                ),
+                Some(
+                    File::open(Self::KPAGEFLAGS).map_err(|e| PageMapError::Open {
+                        path: Self::KPAGEFLAGS.into(),
+                        source: e,
+                    })?,
+                ),
             )
         } else {
             (None, None)
         };
+        let (maps_path, pagemap_path) = (
+            format!("/proc/{}/maps", pid),
+            format!("/proc/{}/pagemap", pid),
+        );
         Ok(PageMap {
             pid,
-            mf: BufReader::with_capacity(1 << 14, File::open(format!("/proc/{}/maps", pid))?),
-            pmf: File::open(format!("/proc/{}/pagemap", pid))?,
+            mf: BufReader::with_capacity(
+                1 << 14,
+                File::open(&maps_path).map_err(|e| PageMapError::Open {
+                    path: maps_path,
+                    source: e,
+                })?,
+            ),
+            pmf: File::open(&pagemap_path).map_err(|e| PageMapError::Open {
+                path: pagemap_path,
+                source: e,
+            })?,
             kcf,
             kff,
             page_size: page_size()?,
@@ -544,34 +630,45 @@ impl PageMap {
         self.pid
     }
 
-    // FIXME?: define custom error type to return?
-    pub fn maps(&mut self) -> Result<Vec<MapsEntry>, std::num::ParseIntError> {
+    pub fn maps(&mut self) -> Result<Vec<MapsEntry>> {
+        let pid = self.pid;
         self.mf
             .by_ref()
             .lines()
-            .map(|line| line.unwrap().parse::<MapsEntry>())
+            .map(|line| {
+                line.map_err(|e| PageMapError::Read {
+                    path: format!("/proc/{}/maps", pid),
+                    source: e,
+                })?
+                .parse()
+            })
             .collect()
     }
 
-    // FIXME: define custom error type to return
-    pub fn pagemap_region(
-        &mut self,
-        region: &MemoryRegion,
-    ) -> Result<Vec<PageMapData>, anyhow::Error> {
+    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> Result<Vec<PageMapData>> {
         let mut buf = [0; 8];
         (region.start..region.end)
             .step_by(self.page_size as usize)
-            .map(|addr: u64| -> Result<_, _> {
+            .map(|addr: u64| -> Result<_> {
                 let vpn = addr / self.page_size;
-                self.pmf.seek(SeekFrom::Start(vpn * 8))?;
-                self.pmf.read_exact(&mut buf)?;
+                self.pmf
+                    .seek(SeekFrom::Start(vpn * 8))
+                    .map_err(|e| PageMapError::Seek {
+                        path: format!("/proc/{}/pagemap", self.pid),
+                        source: e,
+                    })?;
+                self.pmf
+                    .read_exact(&mut buf)
+                    .map_err(|e| PageMapError::Read {
+                        path: format!("/proc/{}/pagemap", self.pid),
+                        source: e,
+                    })?;
                 Ok(u64::from_ne_bytes(buf).into())
             })
-            .collect::<Result<_, _>>()
+            .collect::<Result<_>>()
     }
 
-    // FIXME: define custom error type to return
-    pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapData>)>, anyhow::Error> {
+    pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapData>)>> {
         self.maps()?
             .into_iter()
             .map(|map_entry| {
@@ -596,14 +693,21 @@ impl PageMap {
     /// - `self.kcf` is `None`
     /// - seek failure
     /// - read failure
-    pub fn kpagecount(&self, pfn: u64) -> Result<u64, anyhow::Error> {
+    pub fn kpagecount(&self, pfn: u64) -> Result<u64> {
         let mut buf = [0; 8];
         let mut kcf = self
             .kcf
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("kcf is None!"))?; // FIXME: error type
-        kcf.seek(SeekFrom::Start(pfn * 8))?;
-        kcf.read_exact(&mut buf)?;
+            .ok_or_else(|| PageMapError::Access(Self::KPAGECOUNT.into()))?;
+        kcf.seek(SeekFrom::Start(pfn * 8))
+            .map_err(|e| PageMapError::Seek {
+                path: Self::KPAGECOUNT.into(),
+                source: e,
+            })?;
+        kcf.read_exact(&mut buf).map_err(|e| PageMapError::Read {
+            path: Self::KPAGECOUNT.into(),
+            source: e,
+        })?;
         Ok(u64::from_ne_bytes(buf))
     }
 
@@ -614,14 +718,21 @@ impl PageMap {
     /// - `self.kcf` is `None`
     /// - seek failure
     /// - read failure
-    pub fn kpageflags(&self, pfn: u64) -> Result<KPageFlags, anyhow::Error> {
+    pub fn kpageflags(&self, pfn: u64) -> Result<KPageFlags> {
         let mut buf = [0; 8];
         let mut kff = self
             .kff
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("kff is None!"))?; // FIXME: error type
-        kff.seek(SeekFrom::Start(pfn * 8))?;
-        kff.read_exact(&mut buf)?;
+            .ok_or_else(|| PageMapError::Access(Self::KPAGEFLAGS.into()))?;
+        kff.seek(SeekFrom::Start(pfn * 8))
+            .map_err(|e| PageMapError::Seek {
+                path: Self::KPAGEFLAGS.into(),
+                source: e,
+            })?;
+        kff.read_exact(&mut buf).map_err(|e| PageMapError::Read {
+            path: Self::KPAGEFLAGS.into(),
+            source: e,
+        })?;
         Ok(KPageFlags::from_bits_truncate(u64::from_ne_bytes(buf)))
     }
 }
@@ -632,10 +743,9 @@ impl PageMap {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// FIXME: define custom error type to return
-pub fn page_size() -> Result<u64, std::io::Error> {
+pub fn page_size() -> Result<u64> {
     match unsafe { libc::sysconf(libc::_SC_PAGESIZE) } {
-        -1 => Err(std::io::Error::last_os_error()),
+        -1 => Err(io::Error::last_os_error().into()),
         sz => Ok(sz as u64),
     }
 }
@@ -655,7 +765,13 @@ fn main() -> anyhow::Result<()> {
 
     let mut pm = PageMap::new(pid)?;
     let entries = pm.pagemap()?;
-    eprintln!("\n\n{:#?}\n", entries);
+    //eprintln!("\n\n{:#?}\n", entries);
+    entries.iter().for_each(|e| {
+        eprintln!("-> {}", e.0);
+        e.1.iter().filter(|&pmd| pmd.present()).for_each(|pmd| {
+            eprintln!("\t- {}", pmd);
+        });
+    });
 
     Ok(())
 }
@@ -683,11 +799,11 @@ mod tests {
         }
     }
 
-    #[test]
-    #[should_panic]
-    fn test_invalid_perms() {
-        assert!("----".parse::<PagePermissions>().is_err());
-    }
+    //#[test]
+    ////#[should_panic]
+    //fn test_invalid_perms() {
+    //    assert!("----".parse::<PagePermissions>().is_err());
+    //}
 
     #[test]
     fn test_maps_entry() -> anyhow::Result<()> {
