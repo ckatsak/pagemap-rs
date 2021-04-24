@@ -355,20 +355,20 @@ impl fmt::Display for MapsEntry {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// PageMapData
+// PageMapEntry
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, Clone, Copy)]
-pub struct PageMapData {
+pub struct PageMapEntry {
     pgmap: u64,
     kpgcn: Option<u64>,
     kpgfl: Option<KPageFlags>,
 }
 
-impl std::convert::From<u64> for PageMapData {
+impl std::convert::From<u64> for PageMapEntry {
     fn from(pgmap: u64) -> Self {
-        PageMapData {
+        PageMapEntry {
             pgmap,
             kpgcn: None,
             kpgfl: None,
@@ -377,9 +377,9 @@ impl std::convert::From<u64> for PageMapData {
 }
 
 // TODO: Where to use?
-impl std::convert::From<(u64, u64, u64)> for PageMapData {
+impl std::convert::From<(u64, u64, u64)> for PageMapEntry {
     fn from((pgmap, kpgcn, kpgfl): (u64, u64, u64)) -> Self {
-        PageMapData {
+        PageMapEntry {
             pgmap,
             kpgcn: Some(kpgcn),
             kpgfl: Some(kpgfl.into()),
@@ -387,7 +387,7 @@ impl std::convert::From<(u64, u64, u64)> for PageMapData {
     }
 }
 
-impl PageMapData {
+impl PageMapEntry {
     ///////////////////////////////////////////////////////////////////////////////////////////
     // pagemap constants as defined in Linux, at `fs/proc/task_mmu.c`
     ///////////////////////////////////////////////////////////////////////////////////////////
@@ -530,14 +530,14 @@ impl PageMapData {
     fn_get_bit!(pgtable, KPF_PGTABLE);
 }
 
-impl fmt::Display for PageMapData {
+impl fmt::Display for PageMapEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.present(), self.swapped()) {
             (true, true) => panic!("PAGE BOTH PRESENT AND SWAPPED!"), // FIXME
             (true, false) => {
                 write!(
                     f,
-                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; pfn: 0x{:x} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; pfn: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
                     self.soft_dirty(), self.pfn().unwrap(), // Safe because self.present() == true
                 )
@@ -545,7 +545,7 @@ impl fmt::Display for PageMapData {
             (false, true) => {
                 write!(
                     f,
-                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; swap_type: {}; swap_offset: 0x{:x} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; swap_type: {}; swap_offset: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
                     self.soft_dirty(), self.swap_type().unwrap(), self.swap_offset().unwrap(),
                     // Safe to unwrap because self.swapped() == true
@@ -554,7 +554,7 @@ impl fmt::Display for PageMapData {
             (false, false) => {
                 write!(
                     f,
-                    "PageMapData{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
                     self.soft_dirty(),
                 )
@@ -645,7 +645,7 @@ impl PageMap {
             .collect()
     }
 
-    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> Result<Vec<PageMapData>> {
+    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> Result<Vec<PageMapEntry>> {
         let mut buf = [0; 8];
         (region.start..region.end)
             .step_by(self.page_size as usize)
@@ -668,20 +668,20 @@ impl PageMap {
             .collect::<Result<_>>()
     }
 
-    pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapData>)>> {
+    pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
         self.maps()?
             .into_iter()
             .map(|map_entry| {
-                let mut pmds = self.pagemap_region(&map_entry.region)?;
+                let mut pmes = self.pagemap_region(&map_entry.region)?;
                 if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
-                    for pmd in &mut pmds {
-                        if let Ok(pfn) = pmd.pfn() {
-                            pmd.kpgcn = Some(self.kpagecount(pfn)?);
-                            pmd.kpgfl = Some(self.kpageflags(pfn)?);
+                    for pme in &mut pmes {
+                        if let Ok(pfn) = pme.pfn() {
+                            pme.kpgcn = Some(self.kpagecount(pfn)?);
+                            pme.kpgfl = Some(self.kpageflags(pfn)?);
                         }
                     }
                 }
-                Ok((map_entry, pmds))
+                Ok((map_entry, pmes))
             })
             .collect()
     }
@@ -768,8 +768,8 @@ fn main() -> anyhow::Result<()> {
     //eprintln!("\n\n{:#?}\n", entries);
     entries.iter().for_each(|e| {
         eprintln!("-> {}", e.0);
-        e.1.iter().filter(|&pmd| pmd.present()).for_each(|pmd| {
-            eprintln!("\t- {}", pmd);
+        e.1.iter().filter(|&pme| pme.present()).for_each(|pme| {
+            eprintln!("\t- {}", pme);
         });
     });
 
