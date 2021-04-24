@@ -1,4 +1,4 @@
-use pagemap_rs::PageMap;
+use pagemap::PageMap;
 
 fn parse_args() -> u64 {
     std::env::args().nth(1).unwrap().parse().unwrap() // FIXME

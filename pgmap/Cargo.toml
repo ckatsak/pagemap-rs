@@ -1,0 +1,9 @@
+[package]
+name = "pgmap"
+version = "0.1.0"
+authors = ["Christos Katsakioris <ckatsak@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1"
+pagemap = { path = "../pagemap" }

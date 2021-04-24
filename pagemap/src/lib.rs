@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/lfchring-rs/0.1.3")]
+#![doc(html_root_url = "https://docs.rs/pagemap/0.1.0")]
 #![warn(rust_2018_idioms)]
 #![deny(
     //missing_docs,
@@ -16,7 +16,7 @@ mod pagemap;
 pub use error::{PageMapError, Result};
 pub use kpage::KPageFlags;
 pub use maps::{DeviceNumbers, MapsEntry, MemoryRegion, PagePermissions};
-pub use pagemap::{PageMap, PageMapEntry};
+pub use crate::pagemap::{PageMap, PageMapEntry};
 
 pub fn page_size() -> Result<u64> {
     match unsafe { libc::sysconf(libc::_SC_PAGESIZE) } {
