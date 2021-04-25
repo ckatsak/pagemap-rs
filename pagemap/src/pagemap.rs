@@ -17,6 +17,11 @@ use crate::{
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// An entry read from `/proc/<PID>/pagemap` for a process, and optionally from `/proc/kpagecount`
+/// and `/proc/kpageflags` too.
+///
+/// Documentation and details about the various bits of the API can be found in Linux, at
+/// [`doc/Documentation/vm/pagemap.txt`](https://www.kernel.org/doc/Documentation/vm/pagemap.txt).
 #[derive(Debug, Clone, Copy)]
 pub struct PageMapEntry {
     pgmap: u64,
@@ -45,6 +50,7 @@ impl std::convert::From<(u64, u64, u64)> for PageMapEntry {
     }
 }
 
+/// Constants are defined in Linux, at `fs/proc/task_mmu.c`.
 impl PageMapEntry {
     ///////////////////////////////////////////////////////////////////////////////////////////
     // pagemap constants as defined in Linux, at `fs/proc/task_mmu.c`
@@ -70,43 +76,43 @@ impl PageMapEntry {
         self.pgmap
     }
 
-    /// Returns `true` if the `PM_PRESENT` bit is set; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_PRESENT`] bit is set; `false` otherwise.
     #[inline(always)]
     pub fn present(&self) -> bool {
         self.pgmap >> Self::PM_PRESENT & 1 == 1
     }
 
-    /// Returns `true` if the `PM_SWAP` bit is set; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_SWAP`] bit is set; `false` otherwise.
     #[inline(always)]
     pub fn swapped(&self) -> bool {
         self.pgmap >> Self::PM_SWAP & 1 == 1
     }
 
-    /// Returns `true` if the `PM_FILE` bit is set; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_FILE`] bit is set; `false` otherwise.
     #[inline(always)]
     pub fn file_mapped(&self) -> bool {
         self.pgmap >> Self::PM_FILE & 1 == 1
     }
 
-    /// Returns `true` if the `PM_FILE` bit is clear; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_FILE`] bit is clear; `false` otherwise.
     #[inline(always)]
     pub fn shared_anonymous(&self) -> bool {
         self.pgmap >> Self::PM_FILE & 1 == 0
     }
 
-    /// Returns `true` if the `PM_MMAP_EXCLUSIVE` bit is set; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_MMAP_EXCLUSIVE`] bit is set; `false` otherwise.
     #[inline(always)]
     pub fn exclusively_mapped(&self) -> bool {
         self.pgmap >> Self::PM_MMAP_EXCLUSIVE & 1 == 1
     }
 
-    /// Returns `true` if the `PM_SOFT_DIRTY` bit is set; `false` otherwise.
+    /// Returns `true` if the [`Self::PM_SOFT_DIRTY`] bit is set; `false` otherwise.
     #[inline(always)]
     pub fn soft_dirty(&self) -> bool {
         self.pgmap >> Self::PM_SOFT_DIRTY & 1 == 1
     }
 
-    /// Returns the page frame number (decoding bits 0-54) if the `PM_PRESENT` bit is set;
+    /// Returns the page frame number (decoding bits 0-54) if the [`Self::PM_PRESENT`] bit is set;
     /// otherwise returns an error.
     pub fn pfn(&self) -> Result<u64> {
         if !self.present() {
@@ -116,8 +122,8 @@ impl PageMapEntry {
         }
     }
 
-    /// Returns the swap type (decoding bits 0-4) if the `PM_SWAP` bit is set; otherwise returns an
-    /// error.
+    /// Returns the swap type (decoding bits 0-4) if the [`Self::PM_SWAP`] bit is set; otherwise
+    /// returns an error.
     pub fn swap_type(&self) -> Result<u8> {
         if !self.swapped() {
             Err(PageMapError::PageNotSwapped)
@@ -126,8 +132,8 @@ impl PageMapEntry {
         }
     }
 
-    /// Returns the swap offset (decoding bits 5-55) if the `PM_SWAP` bit is set; otherwise returns
-    /// an error.
+    /// Returns the swap offset (decoding bits 5-55) if the [`Self::PM_SWAP`] bit is set; otherwise
+    /// returns an error.
     pub fn swap_offset(&self) -> Result<u64> {
         if !self.swapped() {
             Err(PageMapError::PageNotSwapped)
@@ -140,7 +146,10 @@ impl PageMapEntry {
     // /proc/kpagecount
     ///////////////////////////////////////////////////////////////////////////////////////////
 
-    /// The raw `u64` value as read from [`procfs(5)`].
+    /// The raw `u64` value as read from [`procfs(5)`], or `None` if `/proc/kpagecount` could not
+    /// be accessed.
+    ///
+    /// [`procfs(5)`]: https://man7.org/linux/man-pages/man5/proc.5.html
     #[inline(always)]
     pub fn kpagecount(&self) -> Option<u64> {
         self.kpgcn
@@ -150,12 +159,17 @@ impl PageMapEntry {
     // /proc/kpageflags
     ///////////////////////////////////////////////////////////////////////////////////////////
 
+    /// The [`KPageFlags`] parsed from `/proc/kpageflags` for the page frame in this
+    /// `PageMapEntry`.
     #[inline(always)]
     pub fn kpageflags(&self) -> Option<KPageFlags> {
         self.kpgfl
     }
 
-    /// The raw `u64` value as read from [`procfs(5)`].
+    /// The raw `u64` value as read from [`procfs(5)`], or `None` if `/proc/kpageflags` could not
+    /// be accessed.
+    ///
+    /// [`procfs(5)`]: https://man7.org/linux/man-pages/man5/proc.5.html
     #[inline(always)]
     pub fn raw_kpageflags(&self) -> Option<u64> {
         self.kpgfl.map(|kpgfl| kpgfl.bits())
@@ -229,6 +243,14 @@ impl fmt::Display for PageMapEntry {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// A handle used to read from:
+///
+/// - `/proc/<PID>/maps`,
+/// - `/proc/<PID>/pagemap`,
+/// - `/proc/kpagecount`, and
+/// - `/proc/kpageflags`
+///
+/// for a specific process.
 #[derive(Debug)]
 pub struct PageMap {
     pid: u64,
@@ -243,6 +265,7 @@ impl PageMap {
     const KPAGECOUNT: &'static str = "/proc/kpagecount";
     const KPAGEFLAGS: &'static str = "/proc/kpageflags";
 
+    /// Construct a new `PageMap` for the process with the given `PID`.
     pub fn new(pid: u64) -> Result<Self> {
         let (kcf, kff) = if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
             (
@@ -285,11 +308,13 @@ impl PageMap {
         })
     }
 
-    /// Returns the `PID` of the process that this `PageMap` refers.
+    /// Returns the `PID` of the process that this `PageMap` concerns.
     pub fn pid(&self) -> u64 {
         self.pid
     }
 
+    /// Returns all virtual memory mappings for the process at hand, as parsed from
+    /// `/proc/<PID>/maps`.
     pub fn maps(&mut self) -> Result<Vec<MapsEntry>> {
         let pid = self.pid;
         self.mf
@@ -305,6 +330,8 @@ impl PageMap {
             .collect()
     }
 
+    /// Returns the entries parsed from reading `/proc/<PID>/pagemap` for all pages in the
+    /// specified [`MemoryRegion`] of the process at hand.
     pub fn pagemap_region(&mut self, region: &MemoryRegion) -> Result<Vec<PageMapEntry>> {
         let mut buf = [0; 8];
         (region.start..region.end)
@@ -328,6 +355,12 @@ impl PageMap {
             .collect::<Result<_>>()
     }
 
+    /// Returns the information about memory mappings, as parsed from reading `/proc/<PID>/maps`,
+    /// along with a `Vec<PageMapEntry>` for each of them, which represent the information read
+    /// from `/proc/<PID>/pagemap` for each contiguous page in each virtual memory region.
+    ///
+    /// If `CAP_SYS_ADMIN` is detected, every [`PageMapEntry`] is also populated with information
+    /// read from `/proc/kpagecount` and `/proc/kpageflags`.
     pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
         self.maps()?
             .into_iter()
@@ -346,13 +379,16 @@ impl PageMap {
             .collect()
     }
 
-    /// Attempt to read the number of times each page is mapped.
+    /// Attempt to read the number of times that the page with the given `PFN` is referenced, from
+    /// `/proc/kpagecount`.
     ///
-    /// # Errors (TODO)
+    /// # Errors
     ///
-    /// - `self.kcf` is `None`
-    /// - seek failure
-    /// - read failure
+    /// The method may return [`PageMapError::Read`] or [`PageMapError::Seek`] if either reading
+    /// from or seeking into `/proc/kpagecount` fails.
+    ///
+    /// Most importantly, the method may return [`PageMapError::Access`] if `CAP_SYS_ADMIN` was not
+    /// available at the time that the `PageMapEntry` was instantiated.
     pub fn kpagecount(&self, pfn: u64) -> Result<u64> {
         let mut buf = [0; 8];
         let mut kcf = self
@@ -371,13 +407,15 @@ impl PageMap {
         Ok(u64::from_ne_bytes(buf))
     }
 
-    /// Attempt to read the set of flags for each page.
+    /// Attempt to read the flags for the page with the given `PFN` from `/proc/kpageflags`.
     ///
-    /// # Errors (TODO)
+    /// # Errors
     ///
-    /// - `self.kcf` is `None`
-    /// - seek failure
-    /// - read failure
+    /// The method may return [`PageMapError::Read`] or [`PageMapError::Seek`] if either reading
+    /// from or seeking into `/proc/kpageflags` fails.
+    ///
+    /// Most importantly, the method may return [`PageMapError::Access`] if `CAP_SYS_ADMIN` was not
+    /// available at the time that the `PageMapEntry` was instantiated.
     pub fn kpageflags(&self, pfn: u64) -> Result<KPageFlags> {
         let mut buf = [0; 8];
         let mut kff = self

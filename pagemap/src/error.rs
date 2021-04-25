@@ -2,29 +2,51 @@ use std::io;
 
 use thiserror::Error;
 
+/// A custom `Result` type for this crate, combining a return value with a [`PageMapError`]. It is
+/// used all over the crate and also returned by many functions and methods of its external API.
 pub type Result<T> = std::result::Result<T, PageMapError>;
 
+/// An error type returned by calls to the API exposed by this crate.
 #[derive(Debug, Error)]
 pub enum PageMapError {
-    /// Bit `PM_PRESENT` is not set.
+    /// The [`PM_PRESENT`] bit is not set.
+    ///
+    /// [`PM_PRESENT`]: struct.PageMapEntry.html#associatedconstant.PM_PRESENT
     #[error("page is not present")]
     PageNotPresent,
 
-    /// Bit `PM_SWAP` is not set.
+    /// The [`PM_SWAP`] bit is not set.
+    ///
+    /// [`PM_SWAP`]: struct.PageMapEntry.html#associatedconstant.PM_SWAP
     #[error("page is not swapped")]
     PageNotSwapped,
 
     /// Error opening a file.
     #[error("could not open '{path}': {source}")]
-    Open { path: String, source: io::Error },
+    Open {
+        /// The path of the file that was attempted to be opened.
+        path: String,
+        /// The underlying error.
+        source: io::Error,
+    },
 
     /// Error reading from a file.
     #[error("could not read '{path}': {source}")]
-    Read { path: String, source: io::Error },
+    Read {
+        /// The path of the file that was attempted to be read.
+        path: String,
+        /// The underlying error.
+        source: io::Error,
+    },
 
     /// Error seeking in a file.
     #[error("could not seek in '{path}': {source}")]
-    Seek { path: String, source: io::Error },
+    Seek {
+        /// The path of the file that was attempted to be seeked.
+        path: String,
+        /// The underlying error.
+        source: io::Error,
+    },
 
     /// Error accessing a file.
     #[error("could not access file '{0}'")]

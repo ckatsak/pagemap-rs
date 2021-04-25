@@ -2,7 +2,7 @@
 
 ## Thoughts & `TODO`s
 
-- [ ] Documentation
+- [x] Documentation
 
 - [ ] `kpagecount` and `kpageflags`
 

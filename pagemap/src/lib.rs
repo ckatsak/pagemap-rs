@@ -1,3 +1,6 @@
+//! A crate to provide a simple API to Linux kernel's
+//! [pagemap API](https://www.kernel.org/doc/Documentation/vm/pagemap.txt).
+
 #![doc(html_root_url = "https://docs.rs/pagemap/0.1.0")]
 #![warn(rust_2018_idioms)]
 #![deny(
@@ -13,10 +16,12 @@ mod kpage;
 mod maps;
 mod pagemap;
 
-pub use crate::pagemap::{PageMap, PageMapEntry};
-pub use error::{PageMapError, Result};
-pub use kpage::KPageFlags;
-pub use maps::{DeviceNumbers, MapsEntry, MemoryRegion, PagePermissions};
+pub use crate::{
+    error::{PageMapError, Result},
+    kpage::KPageFlags,
+    maps::{DeviceNumbers, MapsEntry, MemoryRegion, PagePermissions},
+    pagemap::{PageMap, PageMapEntry},
+};
 
 /// Retrieve system's page size in bytes.
 pub fn page_size() -> Result<u64> {
@@ -26,21 +31,22 @@ pub fn page_size() -> Result<u64> {
     }
 }
 
-/// Convenience function to retrieve the entries of `/proc/PID/maps` for a process.
+/// Convenience function for [`PageMap::maps`], to parse all entries of `/proc/PID/maps` for the
+/// process with the given `PID`.
 #[inline]
 pub fn maps(pid: u64) -> Result<Vec<MapsEntry>> {
     PageMap::new(pid)?.maps()
 }
 
-/// Convenience function to retrieve the entries of `/proc/PID/maps` for a process, combined with
-/// those in `/proc/PID/pagemap` (and also `/proc/kpagecount` and `/proc/kpageflags` if
-/// `CAP_SYS_ADMIN` is available).
+/// Convenience wrapper for [`PageMap::pagemap`], to retrieve the entries of `/proc/PID/maps` for
+/// the process with the given `PID`, combined with those in `/proc/PID/pagemap` (and also
+/// `/proc/kpagecount` and `/proc/kpageflags` if `CAP_SYS_ADMIN` is available).
 #[inline]
 pub fn pagemap(pid: u64) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
     PageMap::new(pid)?.pagemap()
 }
 
-/// Calculate the "unique set size (USS)" (i.e., the amount of memory that a process is using
+/// Calculate the "unique set size" (USS) (i.e., the amount of memory that a process is using
 /// which is not shared with any other process) in bytes.
 pub fn uss(pid: u64) -> Result<u64> {
     Ok(PageMap::new(pid)?

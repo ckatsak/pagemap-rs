@@ -10,6 +10,8 @@ use crate::error::{PageMapError, Result};
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// A region of virtual memory, defined by the first and the next-to-last addresses that it
+/// includes.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct MemoryRegion {
     pub(crate) start: u64,
@@ -17,16 +19,19 @@ pub struct MemoryRegion {
 }
 
 impl MemoryRegion {
+    /// Returns the first address included in the memory region.
     #[inline(always)]
     pub fn start_address(&self) -> u64 {
         self.start
     }
 
+    /// Returns the last address included in the memory region.
     #[inline(always)]
     pub fn last_address(&self) -> u64 {
         self.end - 1
     }
 
+    /// Returns the size of the memory region, in bytes.
     #[inline(always)]
     pub fn size(&self) -> u64 {
         self.end - self.start
@@ -82,11 +87,16 @@ impl fmt::Display for MemoryRegion {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 bitflags! {
+    /// The permissions that a page may have.
     #[derive(Default)]
     pub struct PagePermissions: u8 {
+        /// Permission to be read.
         const READ    = 1 << 0;
+        /// Permission to be written.
         const WRITE   = 1 << 1;
+        /// Permission to be executed.
         const EXECUTE = 1 << 2;
+        /// A page can be `shared` or `private` (i.e., copy-on-write).
         const SHARED  = 1 << 3;
     }
 }
@@ -141,6 +151,7 @@ impl fmt::Display for PagePermissions {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Major and minor numbers of a file.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DeviceNumbers {
     major: u16, // major: u12
@@ -148,11 +159,13 @@ pub struct DeviceNumbers {
 }
 
 impl DeviceNumbers {
+    /// Retrieve the major number.
     #[inline(always)]
     pub fn major(&self) -> u16 {
         self.major
     }
 
+    /// Retrieve the minor number.
     #[inline(always)]
     pub fn minor(&self) -> u32 {
         self.minor
@@ -197,13 +210,23 @@ impl fmt::Display for DeviceNumbers {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// An entry read from `/proc/<PID>/maps` for a process.
 #[derive(Debug, Default, Clone)]
 pub struct MapsEntry {
+    /// The virtual memory region that the mapping concerns.
     pub(crate) region: MemoryRegion,
+    /// The possible ways that pages in the memory region are allowed to be accessed.
     perms: PagePermissions,
+    /// The offset in the file backing the mapping (if any) where the mapping begins.
     offset: u64,
+    /// The major and minor numbers of the file backing the mapping, if any.
     dev: DeviceNumbers,
+    /// The inode of the file backing the mapping, if any.
     inode: u64,
+    /// The name of the file backing the mapping (if any), or a pseudo-path, as described in
+    /// [`procfs(5)`].
+    ///
+    /// [`procfs(5)`]: https://man7.org/linux/man-pages/man5/proc.5.html
     pathname: Option<String>,
 }
 
