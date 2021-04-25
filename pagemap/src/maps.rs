@@ -230,6 +230,45 @@ pub struct MapsEntry {
     pathname: Option<String>,
 }
 
+impl MapsEntry {
+    /// Retrieve the virtual memory region of the mapping.
+    #[inline(always)]
+    pub fn memory_region(&self) -> MemoryRegion {
+        self.region
+    }
+
+    /// Retrieve the permissions for the pages of the particular mapping, which dictate the
+    /// possible ways that the pages of the mapping are allowed to be accessed.
+    #[inline(always)]
+    pub fn permissions(&self) -> PagePermissions {
+        self.perms
+    }
+
+    /// Retrieve the offset in the file backing the mapping (if any) where the mapping begins.
+    #[inline(always)]
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Retrieve the major and minor numbers of the file backing the mapping, if any.
+    #[inline(always)]
+    pub fn device_numbers(&self) -> DeviceNumbers {
+        self.dev
+    }
+
+    /// Retrieve the inode of the file backing the mapping, if any.
+    #[inline(always)]
+    pub fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    /// Retrieve the name of the file backing the mapping (if any), or a pseudo-path, as described
+    /// in [`procfs(5)`].
+    pub fn path(&self) -> Option<&str> {
+        self.pathname.as_ref().map(|p| p.as_ref())
+    }
+}
+
 impl std::str::FromStr for MapsEntry {
     type Err = PageMapError;
 
