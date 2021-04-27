@@ -1,7 +1,7 @@
 //! Simple demonstration of the crate: it prints the entries read from `/proc/<PID>/pagemap` that
 //! are currently present, after retrieving the memory mappings from `/proc/<PID>/maps`.
 //!
-//! Mind the peculiarities regarding `CAP_SYS_ADMIN` documented here:
+//! Mind the peculiarities regarding permissions and `CAP_SYS_ADMIN`, also documented here:
 //! https://www.kernel.org/doc/Documentation/vm/pagemap.txt
 
 use pagemap::{PageMap, PageMapError};
@@ -22,8 +22,8 @@ fn main() -> Result<(), PageMapError> {
     let mut pm = PageMap::new(pid)?;
     // For each mapping of the process (stored in MapsEntry through `/proc/$pid/maps`), gather the
     // PageMapEntry of each page (through `/proc/$pid/pagemap`).
-    // Note that if `CAP_SYS_ADMIN` is detected, each PageMapEntry will also be populated with data
-    // from `/proc/kpagecount` and `/proc/kpageflags`.
+    // Note that, if permitted, each PageMapEntry will also be populated with information from
+    // `/proc/kpagecount` and `/proc/kpageflags`.
     let entries = pm.pagemap()?;
     // Iterate through each MapsEntry...
     entries.iter().for_each(|e| {

@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 bitflags = "1.2"
-caps = "0.5"
 libc = "0.2"
 thiserror = "1.0"
 

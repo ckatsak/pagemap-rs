@@ -40,7 +40,7 @@ pub fn maps(pid: u64) -> Result<Vec<MapsEntry>> {
 
 /// Convenience wrapper for [`PageMap::pagemap`], to retrieve the entries of `/proc/PID/maps` for
 /// the process with the given `PID`, combined with those in `/proc/PID/pagemap` (and also
-/// `/proc/kpagecount` and `/proc/kpageflags` if `CAP_SYS_ADMIN` is available).
+/// `/proc/kpagecount` and `/proc/kpageflags`, if permitted).
 #[inline]
 pub fn pagemap(pid: u64) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
     PageMap::new(pid)?.pagemap()

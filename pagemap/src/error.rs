@@ -56,12 +56,6 @@ pub enum PageMapError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    /// Error retrieving `capabilities(7)`. Wrapper for [`CapsError`].
-    ///
-    /// [`CapsError`]: https://docs.rs/caps/0.5/caps/errors/struct.CapsError.html
-    #[error(transparent)]
-    CapsError(#[from] caps::errors::CapsError),
-
     /// Error parsing [`MemoryRegion`].
     ///
     /// [`MemoryRegion`]: struct.MemoryRegion.html

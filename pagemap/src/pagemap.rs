@@ -2,8 +2,6 @@ use std::fmt;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
-use caps::{CapSet, Capability};
-
 use crate::{
     error::{PageMapError, Result},
     kpage::KPageFlags,
@@ -267,24 +265,20 @@ impl PageMap {
 
     /// Construct a new `PageMap` for the process with the given `PID`.
     pub fn new(pid: u64) -> Result<Self> {
-        let (kcf, kff) = if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
-            (
-                Some(
-                    File::open(Self::KPAGECOUNT).map_err(|e| PageMapError::Open {
-                        path: Self::KPAGECOUNT.into(),
-                        source: e,
-                    })?,
-                ),
-                Some(
-                    File::open(Self::KPAGEFLAGS).map_err(|e| PageMapError::Open {
-                        path: Self::KPAGEFLAGS.into(),
-                        source: e,
-                    })?,
-                ),
-            )
-        } else {
-            (None, None)
-        };
+        let (kcf, kff) = (
+            File::open(Self::KPAGECOUNT)
+                .map_err(|e| PageMapError::Open {
+                    path: Self::KPAGECOUNT.into(),
+                    source: e,
+                })
+                .ok(),
+            File::open(Self::KPAGEFLAGS)
+                .map_err(|e| PageMapError::Open {
+                    path: Self::KPAGEFLAGS.into(),
+                    source: e,
+                })
+                .ok(),
+        );
         let (maps_path, pagemap_path) = (
             format!("/proc/{}/maps", pid),
             format!("/proc/{}/pagemap", pid),
@@ -359,14 +353,14 @@ impl PageMap {
     /// along with a `Vec<PageMapEntry>` for each of them, which represent the information read
     /// from `/proc/<PID>/pagemap` for each contiguous page in each virtual memory region.
     ///
-    /// If `CAP_SYS_ADMIN` is detected, every [`PageMapEntry`] is also populated with information
-    /// read from `/proc/kpagecount` and `/proc/kpageflags`.
+    /// If permitted, every [`PageMapEntry`] is also populated with information read from
+    /// `/proc/kpagecount` and `/proc/kpageflags`.
     pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
         self.maps()?
             .into_iter()
             .map(|map_entry| {
                 let mut pmes = self.pagemap_region(&map_entry.region)?;
-                if caps::has_cap(None, CapSet::Effective, Capability::CAP_SYS_ADMIN)? {
+                if self.kcf.is_some() && self.kff.is_some() {
                     for pme in &mut pmes {
                         if let Ok(pfn) = pme.pfn() {
                             pme.kpgcn = Some(self.kpagecount(pfn)?);
@@ -387,8 +381,8 @@ impl PageMap {
     /// The method may return [`PageMapError::Read`] or [`PageMapError::Seek`] if either reading
     /// from or seeking into `/proc/kpagecount` fails.
     ///
-    /// Most importantly, the method may return [`PageMapError::Access`] if `CAP_SYS_ADMIN` was not
-    /// available at the time that the `PageMapEntry` was instantiated.
+    /// Most importantly, the method may return [`PageMapError::Access`] if opening
+    /// `/proc/kpagecount` was not permitted at the time that the `PageMapEntry` was instantiated.
     pub fn kpagecount(&self, pfn: u64) -> Result<u64> {
         let mut buf = [0; 8];
         let mut kcf = self
@@ -414,8 +408,8 @@ impl PageMap {
     /// The method may return [`PageMapError::Read`] or [`PageMapError::Seek`] if either reading
     /// from or seeking into `/proc/kpageflags` fails.
     ///
-    /// Most importantly, the method may return [`PageMapError::Access`] if `CAP_SYS_ADMIN` was not
-    /// available at the time that the `PageMapEntry` was instantiated.
+    /// Most importantly, the method may return [`PageMapError::Access`] if opening
+    /// `/proc/kpageflags` was not permitted at the time that the `PageMapEntry` was instantiated.
     pub fn kpageflags(&self, pfn: u64) -> Result<KPageFlags> {
         let mut buf = [0; 8];
         let mut kff = self
