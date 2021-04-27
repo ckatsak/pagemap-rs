@@ -36,6 +36,12 @@ impl MemoryRegion {
     pub fn size(&self) -> u64 {
         self.end - self.start
     }
+
+    /// Returns `true` if the given address falls within the memory region, or `false` otherwise.
+    #[inline(always)]
+    pub fn contains(&self, addr: u64) -> bool {
+        addr >= self.start && addr < self.end
+    }
 }
 
 //impl std::convert::TryFrom<(u64, u64)> for MemoryRegion {
@@ -210,7 +216,7 @@ impl fmt::Display for DeviceNumbers {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// An entry read from `/proc/<PID>/maps` for a process.
+/// A memory mapping of a process, parsed from `/proc/<PID>/maps`.
 #[derive(Debug, Default, Clone)]
 pub struct MapsEntry {
     /// The virtual memory region that the mapping concerns.
@@ -264,6 +270,8 @@ impl MapsEntry {
 
     /// Retrieve the name of the file backing the mapping (if any), or a pseudo-path, as described
     /// in [`procfs(5)`].
+    ///
+    /// [`procfs(5)`]: https://man7.org/linux/man-pages/man5/proc.5.html
     pub fn path(&self) -> Option<&str> {
         self.pathname.as_ref().map(|p| p.as_ref())
     }
