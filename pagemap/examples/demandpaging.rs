@@ -1,4 +1,4 @@
-//! Simple demonstration of the crate: it showcases Linux' demand paging, by checking
+//! Simple demonstration of the crate: it showcases demand paging in Linux, by checking
 //! `/proc/self/maps` and `/proc/<PID>/pagemap` before and after writing to a page allocated via
 //! `mmap(2)`, to observe the physical frame allocation.
 //!

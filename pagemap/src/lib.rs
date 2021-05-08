@@ -5,7 +5,6 @@
 #![warn(rust_2018_idioms)]
 #![deny(
     //missing_docs,
-    //missing_doc_code_examples, // nightly-only?
     unreachable_pub,
     broken_intra_doc_links,
 )]

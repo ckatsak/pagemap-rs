@@ -117,13 +117,13 @@ impl std::str::FromStr for PagePermissions {
             return Err(PageMapError::ParsePagePermissions(s.into()));
         }
         let mut ret: PagePermissions = Default::default();
-        for c in s.chars() {
+        for c in s.bytes() {
             ret |= match c {
-                'r' => Self::READ,
-                'w' => Self::WRITE,
-                'x' => Self::EXECUTE,
-                's' => Self::SHARED,
-                'p' | '-' => Self::empty(),
+                b'r' => Self::READ,
+                b'w' => Self::WRITE,
+                b'x' => Self::EXECUTE,
+                b's' => Self::SHARED,
+                b'p' | b'-' => Self::empty(),
                 _ => return Err(PageMapError::ParsePagePermissions(s.into())),
             }
         }
