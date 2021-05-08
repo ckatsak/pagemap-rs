@@ -12,7 +12,8 @@
 <!--[![Travis (.com) branch](https://img.shields.io/travis/com/ckatsak/pagemap-rs/main)](https://travis-ci.com/ckatsak/pagemap-rs)-->
 <!--[![GitHub Workflow Status](https://img.shields.io/github/workflow/status/ckatsak/pagemap-rs/basic.yml)](https://github.com/ckatsak/pagemap-rs/actions/workflows/basic.yml)-->
 
-{{readme}}
+A crate to provide a simple API to Linux kernel's
+[pagemap API](https://www.kernel.org/doc/Documentation/vm/pagemap.txt).
 
 Check the [examples directory](./examples/) for a few examples of its usage.
 
