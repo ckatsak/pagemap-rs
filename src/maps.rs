@@ -334,7 +334,7 @@ mod tests {
     //}
 
     #[test]
-    fn test_maps_entry() -> anyhow::Result<()> {
+    fn test_maps_entry() -> std::result::Result<(), PageMapError> {
         let start: u64 = u64::from_str_radix("7f368bc85000", 16).unwrap();
         eprintln!("start = {:#?}", start);
 
