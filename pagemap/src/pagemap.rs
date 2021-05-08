@@ -205,7 +205,7 @@ impl PageMapEntry {
 impl fmt::Display for PageMapEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.present(), self.swapped()) {
-            (true, true) => panic!("PAGE BOTH PRESENT AND SWAPPED!"), // FIXME
+            (true, true) => unreachable!("PAGE BOTH PRESENT AND SWAPPED!"),
             (true, false) => {
                 write!(
                     f,
