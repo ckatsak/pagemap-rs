@@ -28,12 +28,12 @@ fn main() -> Result<(), PageMapError> {
     // Iterate through each MapsEntry...
     entries.iter().for_each(|e| {
         // ...printing it...
-        eprintln!("-> {}", e.0);
+        println!("-> {}", e.0);
         // ...and then loop through each PageMapEntry (one per page of the MapsEntry), filtering
         // out any page that appears to not be present...
         e.1.iter().filter(|&pme| pme.present()).for_each(|pme| {
             // ...and printing the rest of them.
-            eprintln!("\t- {}", pme);
+            println!("\t- {}", pme);
         });
     });
 

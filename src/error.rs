@@ -56,11 +56,11 @@ pub enum PageMapError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 
-    /// Error parsing [`MemoryRegion`].
+    /// Error parsing [`VirtualMemoryArea`].
     ///
-    /// [`MemoryRegion`]: struct.MemoryRegion.html
-    #[error("could not parse MemoryRegion from the given addresses: {0}")]
-    ParseMemoryRegion(std::num::ParseIntError),
+    /// [`VirtualMemoryArea`]: struct.VirtualMemoryArea.html
+    #[error("could not parse VirtualMemoryArea from the given addresses: {0}")]
+    ParseVirtualMemoryArea(std::num::ParseIntError),
 
     /// Error parsing [`PagePermissions`].
     ///

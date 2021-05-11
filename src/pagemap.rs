@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use crate::{
     error::{PageMapError, Result},
     kpage::KPageFlags,
-    maps::{MapsEntry, MemoryRegion},
+    maps::{MapsEntry, VirtualMemoryArea},
     page_size,
 };
 
@@ -325,10 +325,10 @@ impl PageMap {
     }
 
     /// Returns the entries parsed from reading `/proc/<PID>/pagemap` for all pages in the
-    /// specified [`MemoryRegion`] of the process at hand.
-    pub fn pagemap_region(&mut self, region: &MemoryRegion) -> Result<Vec<PageMapEntry>> {
+    /// specified [`VirtualMemoryArea`] of the process at hand.
+    pub fn pagemap_vma(&mut self, vma: &VirtualMemoryArea) -> Result<Vec<PageMapEntry>> {
         let mut buf = [0; 8];
-        (region.start..region.end)
+        (vma.start..vma.end)
             .step_by(self.page_size as usize)
             .map(|addr: u64| -> Result<_> {
                 let vpn = addr / self.page_size;
@@ -351,7 +351,7 @@ impl PageMap {
 
     /// Returns the information about memory mappings, as parsed from reading `/proc/<PID>/maps`,
     /// along with a `Vec<PageMapEntry>` for each of them, which represent the information read
-    /// from `/proc/<PID>/pagemap` for each contiguous page in each virtual memory region.
+    /// from `/proc/<PID>/pagemap` for each contiguous page in each virtual memory area.
     ///
     /// If permitted, every [`PageMapEntry`] is also populated with information read from
     /// `/proc/kpagecount` and `/proc/kpageflags`.
@@ -359,7 +359,7 @@ impl PageMap {
         self.maps()?
             .into_iter()
             .map(|map_entry| {
-                let mut pmes = self.pagemap_region(&map_entry.region)?;
+                let mut pmes = self.pagemap_vma(&map_entry.vma)?;
                 if self.kcf.is_some() && self.kff.is_some() {
                     for pme in &mut pmes {
                         if let Ok(pfn) = pme.pfn() {

@@ -18,7 +18,7 @@ mod pagemap;
 pub use crate::{
     error::{PageMapError, Result},
     kpage::KPageFlags,
-    maps::{DeviceNumbers, MapsEntry, MemoryRegion, PagePermissions},
+    maps::{DeviceNumbers, MapsEntry, PagePermissions, VirtualMemoryArea},
     pagemap::{PageMap, PageMapEntry},
 };
 

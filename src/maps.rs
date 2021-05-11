@@ -6,45 +6,46 @@ use crate::error::{PageMapError, Result};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// MemoryRegion
+// VirtualMemoryArea
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A region of virtual memory, defined by the first and the next-to-last addresses that it
 /// includes.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct MemoryRegion {
+pub struct VirtualMemoryArea {
     pub(crate) start: u64,
     pub(crate) end: u64,
 }
 
-impl MemoryRegion {
-    /// Returns the first address included in the memory region.
+impl VirtualMemoryArea {
+    /// Returns the first address included in the virtual memory area.
     #[inline(always)]
     pub fn start_address(&self) -> u64 {
         self.start
     }
 
-    /// Returns the last address included in the memory region.
+    /// Returns the last address included in the virtual memory area.
     #[inline(always)]
     pub fn last_address(&self) -> u64 {
         self.end - 1
     }
 
-    /// Returns the size of the memory region, in bytes.
+    /// Returns the size of the virtual memory area, in bytes.
     #[inline(always)]
     pub fn size(&self) -> u64 {
         self.end - self.start
     }
 
-    /// Returns `true` if the given address falls within the memory region, or `false` otherwise.
+    /// Returns `true` if the given address falls within the virtual memory area, or `false`
+    /// otherwise.
     #[inline(always)]
     pub fn contains(&self, addr: u64) -> bool {
         addr >= self.start && addr < self.end
     }
 }
 
-//impl std::convert::TryFrom<(u64, u64)> for MemoryRegion {
+//impl std::convert::TryFrom<(u64, u64)> for VirtualMemoryArea {
 //    type Error = // TODO: Define own error types
 //
 //    fn try_from(r: (u64, u64)) -> Result<Self, Self::Error> {
@@ -52,29 +53,29 @@ impl MemoryRegion {
 //    }
 //}
 
-impl std::convert::From<(u64, u64)> for MemoryRegion {
+impl std::convert::From<(u64, u64)> for VirtualMemoryArea {
     fn from(r: (u64, u64)) -> Self {
         debug_assert!(r.0 < r.1); // TODO: TryFrom
-        MemoryRegion {
+        VirtualMemoryArea {
             start: r.0,
             end: r.1,
         }
     }
 }
 
-impl std::str::FromStr for MemoryRegion {
+impl std::str::FromStr for VirtualMemoryArea {
     type Err = PageMapError;
 
     fn from_str(s: &str) -> Result<Self> {
         let r: Vec<_> = s
             .splitn(2, '-')
-            .map(|addr| u64::from_str_radix(addr, 16).map_err(PageMapError::ParseMemoryRegion))
+            .map(|addr| u64::from_str_radix(addr, 16).map_err(PageMapError::ParseVirtualMemoryArea))
             .collect::<Result<_>>()?;
         Ok((r[0], r[1]).into())
     }
 }
 
-impl fmt::Display for MemoryRegion {
+impl fmt::Display for VirtualMemoryArea {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -219,9 +220,9 @@ impl fmt::Display for DeviceNumbers {
 /// A memory mapping of a process, parsed from `/proc/<PID>/maps`.
 #[derive(Debug, Default, Clone)]
 pub struct MapsEntry {
-    /// The virtual memory region that the mapping concerns.
-    pub(crate) region: MemoryRegion,
-    /// The possible ways that pages in the memory region are allowed to be accessed.
+    /// The virtual memory area that the mapping concerns.
+    pub(crate) vma: VirtualMemoryArea,
+    /// The possible ways that pages in the virtual memory area are allowed to be accessed.
     perms: PagePermissions,
     /// The offset in the file backing the mapping (if any) where the mapping begins.
     offset: u64,
@@ -237,10 +238,10 @@ pub struct MapsEntry {
 }
 
 impl MapsEntry {
-    /// Retrieve the virtual memory region of the mapping.
+    /// Retrieve the virtual memory area of the mapping.
     #[inline(always)]
-    pub fn memory_region(&self) -> MemoryRegion {
-        self.region
+    pub fn vma(&self) -> VirtualMemoryArea {
+        self.vma
     }
 
     /// Retrieve the permissions for the pages of the particular mapping, which dictate the
@@ -283,7 +284,7 @@ impl std::str::FromStr for MapsEntry {
     fn from_str(s: &str) -> Result<Self> {
         let s: Vec<_> = s.split_ascii_whitespace().collect();
         Ok(MapsEntry {
-            region: s[0].parse()?,
+            vma: s[0].parse()?,
             perms: s[1].parse()?,
             offset: u64::from_str_radix(s[2], 16)?,
             dev: s[3].parse()?,
@@ -299,7 +300,7 @@ impl fmt::Display for MapsEntry {
         write!(
             f,
             "{} {} {:20} {} {} {:?}",
-            self.region, self.perms, self.offset, self.dev, self.inode, self.pathname
+            self.vma, self.perms, self.offset, self.dev, self.inode, self.pathname
         )
     }
 }

@@ -25,23 +25,23 @@ fn main() -> Result<(), PageMapError> {
         )
     };
     assert_ne!(ptr, std::ptr::null_mut(), "mmap(2) failed");
-    eprintln!("ptr = {:#?}", ptr);
+    println!("ptr = {:#?}", ptr);
 
     // Find the VMA related to the allocation above.
     let vma = pm
         .maps()?
         .into_iter()
-        .find(|me| me.memory_region().contains(ptr as u64))
+        .find(|me| me.vma().contains(ptr as u64))
         .expect("mapping not found")
-        .memory_region();
-    eprintln!("vma = {}", vma);
+        .vma();
+    println!("vma = {}", vma);
 
     // Find the pagemap entries related with the pages of this VMA.
-    let pagemap_entries = pm.pagemap_region(&vma)?;
+    let pagemap_entries = pm.pagemap_vma(&vma)?;
     // Since we allocated a single page, we expect a single PageMapEntry as well.
     assert_eq!(1, pagemap_entries.len());
     let pagemap_entry = pagemap_entries[0];
-    eprintln!("pagemap_entry (before)\t= {}", pagemap_entry);
+    println!("pagemap_entry (before)\t= {}", pagemap_entry);
 
     // Since we have not written to the allocated page, and because of Linux' demand-paging, we
     // expect that no physical frame will have been allocated for this page.
@@ -51,8 +51,8 @@ fn main() -> Result<(), PageMapError> {
     unsafe { libc::memset(ptr, 0xff, pagemap::page_size()? as usize) };
 
     // ...and read `/proc/self/pagemap` again.
-    let pagemap_entry = pm.pagemap_region(&vma)?[0];
-    eprintln!("pagemap_entry (after)\t= {}", pagemap_entry);
+    let pagemap_entry = pm.pagemap_vma(&vma)?[0];
+    println!("pagemap_entry (after)\t= {}", pagemap_entry);
 
     // This time, the physical frame should be present!
     assert!(pagemap_entry.present());
