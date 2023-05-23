@@ -58,6 +58,7 @@ impl PageMapEntry {
     pub const PM_PFRAME_MASK: u64 = (1 << Self::PM_PFRAME_BITS) - 1;
     pub const PM_SOFT_DIRTY: u64 = 55;
     pub const PM_MMAP_EXCLUSIVE: u64 = 56;
+    pub const PM_PTE_UFFD_WP: u64 = 57;
     pub const PM_FILE: u64 = 61;
     pub const PM_SWAP: u64 = 62;
     pub const PM_PRESENT: u64 = 63;
@@ -102,6 +103,12 @@ impl PageMapEntry {
     #[inline(always)]
     pub fn exclusively_mapped(&self) -> bool {
         self.pgmap >> Self::PM_MMAP_EXCLUSIVE & 1 == 1
+    }
+
+    /// Returns `true` if the [`Self::PM_PTE_UFFD_WP`] bit is set; `false` otherwise.
+    #[inline(always)]
+    pub fn pte_uffd_wp(&self) -> bool {
+        self.pgmap >> Self::PM_PTE_UFFD_WP & 1 == 1
     }
 
     /// Returns `true` if the [`Self::PM_SOFT_DIRTY`] bit is set; `false` otherwise.
@@ -209,26 +216,26 @@ impl fmt::Display for PageMapEntry {
             (true, false) => {
                 write!(
                     f,
-                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; pfn: 0x{:x} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; pte_uffd_wp: {}; soft_dirty: {}; pfn: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
-                    self.soft_dirty(), self.pfn().unwrap(), // Safe because self.present() == true
+                    self.pte_uffd_wp(), self.soft_dirty(), self.pfn().unwrap(), // Safe because self.present() == true
                 )
             }
             (false, true) => {
                 write!(
                     f,
-                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {}; swap_type: {}; swap_offset: 0x{:x} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; pte_uffd_wp: {}; soft_dirty: {}; swap_type: {}; swap_offset: 0x{:x} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
-                    self.soft_dirty(), self.swap_type().unwrap(), self.swap_offset().unwrap(),
+                    self.pte_uffd_wp(), self.soft_dirty(), self.swap_type().unwrap(), self.swap_offset().unwrap(),
                     // Safe to unwrap because self.swapped() == true
                 )
             }
             (false, false) => {
                 write!(
                     f,
-                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; soft_dirty: {} }}",
+                    "PageMapEntry{{ present: {}; swapped: {}; file_mapped: {}; exclusively_mapped: {}; pte_uffd_wp: {}; soft_dirty: {} }}",
                     self.present(), self.swapped(), self.file_mapped(), self.exclusively_mapped(),
-                    self.soft_dirty(),
+                    self.pte_uffd_wp(), self.soft_dirty(),
                 )
             }
         }
@@ -358,6 +365,7 @@ impl PageMap {
     pub fn pagemap(&mut self) -> Result<Vec<(MapsEntry, Vec<PageMapEntry>)>> {
         self.maps()?
             .into_iter()
+            .filter(|map_entry| map_entry.path().map(|path| !path.contains("vsyscall")).unwrap_or(false))
             .map(|map_entry| {
                 let mut pmes = self.pagemap_vma(&map_entry.vma)?;
                 if self.kcf.is_some() && self.kff.is_some() {
